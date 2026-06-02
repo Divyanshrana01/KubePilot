@@ -94,7 +94,7 @@ SRE / User (HTTPS + JWT Bearer)
 ## Project Structure
 
 ```
-enterprise-rag/
+KubePilot/
 ├── api/
 │   ├── main.py                  # FastAPI app, routes, middleware chain
 │   ├── auth.py                  # JWT middleware (L4a)
@@ -184,8 +184,8 @@ Input pipeline: L1 injection detection, L4a JWT, L4b rate limit, L6 token budget
 ### Local dev
 
 ```bash
-git clone https://github.com/<your-username>/enterprise-rag
-cd enterprise-rag
+git clone https://github.com/Divyanshrana01/KubePilot.git
+cd KubePilot
 
 cp .env.example .env
 # Fill in: OPENAI_API_KEY, QDRANT_URL, QDRANT_API_KEY,

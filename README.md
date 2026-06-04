@@ -76,7 +76,7 @@ SRE / User (HTTPS + JWT Bearer)
 
 ---
 
-## What You Will Learn
+## What is Done
 
 - Advanced RAG design patterns (HyDE, CRAG, Self-RAG)
 - Hybrid search: dense + BM25 sparse vectors, RRF fusion
@@ -136,39 +136,6 @@ KubePilot/
 └── requirements.txt
 ```
 
----
-
-## Build Phases
-
-### Phase 1 - Baseline RAG + Infra (Week 1-2)
-
-FastAPI service, Qdrant dense retrieval, PostgreSQL, Redis client, Streamlit stub. Nail the data layer before adding any advanced technique.
-
-### Phase 2 - Hybrid Search + Reranking + HyDE (Week 2-3)
-
-Qdrant sparse (BM25) + dense hybrid collection. RRF fusion at k=60. BGE cross-encoder reranks top-20. HyDE generates 3 hypothetical answers before embedding. Measure RAGAS delta before moving on.
-
-### Phase 3 - CRAG + Spotlighting (Week 3-4)
-
-LangGraph grader node scores each retrieved chunk. Score < 0.7 triggers Tavily web fallback. Chunks wrapped in `<doc id=N>` XML tags before LLM call. Context precision improves measurably.
-
-### Phase 4 - Self-RAG Reflect Loop (Week 4-5)
-
-Post-generation faithfulness score. Score < 0.8 triggers re-retrieval. Max 2 retries. Catches confident-but-wrong answers on novel K8s error patterns.
-
-### Phase 5 - Text2SQL + Human-in-the-Loop (Week 5-6)
-
-Intent router classifies queries as `rag / sql / hybrid`. GPT-4o with full schema in system prompt generates SQL. AST validator blocks non-SELECT. `interrupt()` pauses the graph and surfaces SQL to Streamlit for human approve/reject before execution.
-
-### Phase 6 - 9-Layer Guardrails (Week 6-8)
-
-Input pipeline: L1 injection detection, L4a JWT, L4b rate limit, L6 token budget, L5 restructure, L2 llm-guard, L7a PII redaction. Output pipeline: L7b post-generation moderation, L9 Pydantic schema validation with LLM retry on failure.
-
-### Phase 7 - RAGAS Evals + Cache + Deploy (Week 8-10)
-
-5-tier Redis cache wired on all expensive calls. RAGAS eval suite runs against 50 golden Q&A pairs. Dockerized services pushed to ECR. AWS ECS Fargate deployment via GitHub Actions.
-
----
 
 ## Setup
 
@@ -201,23 +168,6 @@ uvicorn api.main:app --reload # FastAPI on :8000
 streamlit run ui/app.py       # Streamlit UI on :8501
 ```
 
-### Environment variables
-
-```
-OPENAI_API_KEY=
-QDRANT_URL=
-QDRANT_API_KEY=
-QDRANT_COLLECTION=k8s-sre
-REDIS_URL=
-DATABASE_URL=postgresql://...
-TAVILY_API_KEY=
-JWT_SECRET=
-JWT_ALGORITHM=HS256
-RATE_LIMIT_RPM=20
-TOKEN_BUDGET_DAILY=100000
-```
-
----
 
 ## Evaluation
 
@@ -295,14 +245,6 @@ L7a  Content Moderation       PII redaction (regex + NER) before LLM
 L7b  Output Moderation        Post-generation PII scan
 L9   Pydantic Schema Val.     Structured output validation, LLM retry on fail
 ```
-
----
-
-## Hardware Notes
-
-Developed and tested on RTX/GTX 1650 4GB + Ryzen 5 5600H.
-
-For local reranking: use `cross-encoder/ms-marco-MiniLM-L-6-v2` instead of BGE-large to fit within 4GB VRAM. All LLM calls (GPT-4o, embeddings) go via API so GPU is used only for local reranker inference.
 
 ---
 

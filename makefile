@@ -1,74 +1,69 @@
-.PHONY : help install sync seed seed-data api streamlit eval eval-baseline eval-hybrid eval-rerank eval-
+.PHONY: help install sync up down restart build rebuild logs ps seed health test lint format
 
-help: 
-	@echo "ADV RAG - Available commands"
+help:
+	@echo "Enterprise RAG - Available commands"
 	@echo ""
-	@echo "  make install        - create venv and install dependencies(one-time setup)"
-	@echo "  make sync           - Sync dependencies with pyproject.toml"
-	@echo "  make seed           - Seed the database + ingest docs into qdrant"
-	@echo "  make seed-data      - download + generate the 95/5 noise corpus (~130-200 MB)"
-	@echo "  make api            - Start the FastAPI backend (:8000)"
-	@echo "  make streamlit      - Start the Streamlit UI (:8501)"
-	@echo "  make eval           - Run baseline + all + diff"
-	@echo "  make test           - Run pytest"
-	@echo "  make lint           - Run ruff check"
-	@echo "  make format         - Run ruff format"
+	@echo "  make install    - Create venv and install dependencies (one-time setup)"
+	@echo "  make sync       - Sync dependencies with pyproject.toml"
+	@echo "  make up         - Start all Docker services"
+	@echo "  make down       - Stop all Docker services"
+	@echo "  make restart    - Restart the app container"
+	@echo "  make build      - Build Docker images"
+	@echo "  make rebuild    - Force rebuild Docker images and start"
+	@echo "  make logs       - Tail app container logs"
+	@echo "  make ps         - Show container status"
+	@echo "  make seed       - Run DB migrations + seed demo data"
+	@echo "  make health     - Check /admin/health endpoint"
+	@echo "  make test       - Run pytest"
+	@echo "  make lint       - Run ruff check"
+	@echo "  make format     - Run ruff format"
 
-
-
-
+# ── Local dev ────────────────────────────────────────────────────────────────
 
 install:
-	uv python pip 3.12
 	uv venv --python python3.12
-	uv sync --extra dev
+	uv sync
 
 sync:
-	uv sync --extra dev 
+	uv sync
 
+# ── Docker ───────────────────────────────────────────────────────────────────
+
+up:
+	docker compose up -d
+
+down:
+	docker compose down
+
+restart:
+	docker compose restart app
+
+build:
+	docker compose build
+
+rebuild:
+	docker compose build --no-cache
+	docker compose up -d
+
+logs:
+	docker compose logs app -f
+
+ps:
+	docker compose ps
 
 seed:
-	uv run python -m adv_rag.seed
+	docker compose --profile seed run --rm db-seed
 
+health:
+	curl -s http://localhost:8000/admin/health | python -m json.tool
 
-eval-baseline:
-
-eval-hybrid:
-	uv run python -m eval.run_ragas --profile hybrid
-
-eval-rerank:
-	uv run python -m eval.run_ragas --profile hybrid+rerank
-
-eval-hyde:
-	uv run python -m eval.run_ragas --profile hybrid+rerank+hyde --filter hyde
-
-eval-crag:
-	uv run python -m eval.run_ragas --profile hybrid+rerank+crag --filter crag
-
-eval-all:
-	uv run python -m eval.run_ragas --profile all
-
-eval: eval-baseline eval-all 
-	$(MAKE) eval-diff
-
-eval-diff:
-	@latest_naive=$$(ls -t eval/results/baseline_*.json | head -n 1); \
-
-
-
-
-validate:
-	uv run python scripts/validate_goldens.py
+# ── Quality ──────────────────────────────────────────────────────────────────
 
 test:
 	uv run pytest tests/ -v
 
 lint:
-	uv ruff check .
+	uv run ruff check .
 
 format:
 	uv run ruff format .
-
-
-eval-legacy:
-	@eco "Use: make eval-baseline"

@@ -5,12 +5,12 @@ from loguru import logger
 from app.middleware.auth import hash_password
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/adv_rag")
-MIGRATIONS_DIR = os.path.join(os.path.dirname(__file__),"..", "Seed", "migrations")
+MIGRATIONS_DIR = os.path.join(os.path.dirname(__file__), "..", "seed", "migrations")
 
 
 DEMO_USERS = [
-    {"agent@demo.local","agent123",False},
-    {"admin@demo.local","admin123",True}
+    ("agent@demo.local", "agent123", False),
+    ("admin@demo.local", "admin123", True),
 ]
 
 def run_migrations(conn: psycopg2.extensions.connection) -> None:

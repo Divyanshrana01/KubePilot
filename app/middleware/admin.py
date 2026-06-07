@@ -14,7 +14,7 @@ router = APIRouter(tags=["admin"])
 async def _ping_postgres() -> bool:
     try:
         import psycopg2
-        conn = psycopg2.connect(settings.postgres_url, connect_timeout=2)
+        conn = psycopg2.connect(settings.database_url, connect_timeout=2)
         cur = conn.cursor()
         cur.execute("SELECT 1")
         cur.close()

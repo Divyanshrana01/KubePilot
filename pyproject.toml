@@ -49,3 +49,10 @@ dependencies = [
     "vanna[openai,postgres]>=2.0.2",
     "voyageai>=0.3.7",
 ]
+
+[tool.uv]
+# xformers requires CUDA/OpenMP which Apple clang doesn't support.
+# It's a GPU optimization dep pulled in by llm-guard — not needed on macOS/MPS.
+override-dependencies = [
+    "xformers; sys_platform != 'darwin'",
+]

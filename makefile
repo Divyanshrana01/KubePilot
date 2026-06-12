@@ -32,7 +32,7 @@ sync:
 # ── Data & DB ────────────────────────────────────────────────────────────────
 
 seed:
-	uv run python scripts/seed_db.py
+	PYTHONPATH=. uv run python scripts/seed_db.py
 
 # ── App ──────────────────────────────────────────────────────────────────────
 

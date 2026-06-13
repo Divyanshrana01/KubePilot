@@ -41,6 +41,7 @@ bcrypt
 boto3
 
 pyyaml
+loguru
 
 faker
 

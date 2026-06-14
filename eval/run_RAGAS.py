@@ -13,7 +13,11 @@ from eval.profiles import PROFILES
 from eval.reporting import aggregate, print_table
 from eval.schema import load_goldens
 
+#this is the main entry point for the eval pipeline.
+#it loads goldens, runs them through the rag system, scores them with ragas,
+#runs post-checks, then saves a json report and prints a markdown table.
 def main() -> None:
+    #set up cli arguments so the user can pick which profile and questions file to use
     ap = argparse.ArgumentParser(description="Run Ragas eval harness")
     ap.add_argument(
         "--profile",
@@ -46,6 +50,7 @@ def main() -> None:
     flags = PROFILES[args.profile]
     goldens = load_goldens(args.questions)
 
+    #if a feature filter is given, only run goldens for that feature plus the baselines
     if args.filter:
         goldens = [
             g
@@ -61,16 +66,20 @@ def main() -> None:
     rows: list[dict] = []
     skipped: list[dict] = []
 
+    #run each golden through the rag system and collect the answers
     for g in goldens:
         try:
             resp, chunks = invoker.invoke(g.question, flags, g.intent)
         except SkippedIntent as e:
+            #intent not supported by this invoker — skip gracefully
             skipped.append({"id": g.id, "reason": str(e)})
             continue
         except Exception as e:
+            #unexpected error — skip and log it
             skipped.append({"id": g.id, "reason": f"error: {e}"})
             continue
 
+        #store everything we need for ragas scoring and post-checks
         rows.append(
             {
                 "id": g.id,
@@ -86,11 +95,14 @@ def main() -> None:
             }
         )
 
+    #run ragas scoring on all the rows we collected
     if rows:
         from eval.ragas_adapter import run as run_ragas
         metrics = run_ragas(rows)
     else:
         metrics = []
+
+    #attach the ragas scores and post-check results to each row
     for row, m in zip(rows, metrics):
         row["ragas_metrics"] = m
         row["forbidden_check"] = forbidden_keywords_check(
@@ -100,6 +112,7 @@ def main() -> None:
             row["actual_sources"], row["golden_sources"]
         )
 
+    #build the output file path — default is eval/results/<timestamp>_<profile>.json
     timestamp = datetime.datetime.now(datetime.timezone.utc)
     out_path = (
         Path(args.output)
@@ -110,6 +123,7 @@ def main() -> None:
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    #assemble the full result payload and write it to disk
     payload = {
         "profile": args.profile,
         "flags": flags,

@@ -51,8 +51,9 @@ dependencies = [
 ]
 
 [tool.uv]
-# xformers requires CUDA/OpenMP which Apple clang doesn't support.
-# It's a GPU optimization dep pulled in by llm-guard — not needed on macOS/MPS.
+# xformers is a GPU-only optimization dep pulled in by llm-guard.
+# No pre-built wheels exist for macOS (Apple clang) or Linux ARM64 (aarch64),
+# and building from source requires CUDA — skip it on both platforms.
 override-dependencies = [
-    "xformers; sys_platform != 'darwin'",
+    "xformers; sys_platform != 'darwin' and platform_machine != 'aarch64'",
 ]

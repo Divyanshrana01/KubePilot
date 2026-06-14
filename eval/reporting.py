@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from statistics import mean
 
+#the 4 ragas metric names we compute averages for in the aggregate row
 METRIC_KEYS = [
     "faithfulness",
     "context_precision",
@@ -9,9 +10,12 @@ METRIC_KEYS = [
     "answer_relevancy",
 ]
 
+#this fn takes all the eval rows and computes the average of each metric across all questions.
+#it also counts how many answers had forbidden keyword violations.
 def aggregate(rows: list[dict]) -> dict:
     out: dict = {}
     for k in METRIC_KEYS:
+        #collect the score for this metric from every row that has it
         vals = [
             r["ragas_metrics"].get(k)
             for r in rows
@@ -24,6 +28,8 @@ def aggregate(rows: list[dict]) -> dict:
     return out
 
 
+#this fn prints a markdown table to stdout with one row per golden question
+#and an aggregate row at the bottom showing the averages.
 def print_table(payload: dict) -> None:
     """Print a markdown table of per-question results + aggregate row.
 
@@ -42,6 +48,7 @@ def print_table(payload: dict) -> None:
 
     for r in payload["rows"]:
         m = r.get("ragas_metrics") or {}
+        #show "OK" if no forbidden words appeared, otherwise show which words hit
         fb = (
             "OK"
             if r["forbidden_check"]["passed"]
@@ -59,8 +66,8 @@ def print_table(payload: dict) -> None:
         print("(no rows evaluated — all goldens skipped)")
         return
 
+    #print the aggregate row at the bottom in bold
     a = payload["aggregate"]
-
 
     print(
         f"| **AGG** | — | **{a['faithfulness']}** | "

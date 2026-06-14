@@ -18,6 +18,11 @@ from ragas.metrics import (
 from app.config import settings
 
 
+#these are the 4 ragas metrics we evaluate every answer on:
+# - faithfulness: did the answer stick to what the retrieved chunks said?
+# - context_precision: did we retrieve the right chunks?
+# - context_recall: did we retrieve all the relevant chunks?
+# - answer_relevancy: did the answer actually answer the question?
 METRICS = [
     faithfulness,
     context_precision,
@@ -26,12 +31,13 @@ METRICS = [
 ]
 
 
-
+#creates a ragas-compatible llm wrapper using our app's grader model
 def _get_ragas_llm():
     """Create a Ragas-compatible LLM using app settings."""
     os.environ.setdefault("OPENAI_API_KEY", settings.openai_api_key)
     return llm_factory(settings.llm_model_grader)
 
+#creates a ragas-compatible embedding wrapper using our app's embedding model
 def _get_ragas_embeddings():
     """Create Ragas-compatible embeddings using app settings."""
     lc_emb = OpenAIEmbeddings(
@@ -40,6 +46,7 @@ def _get_ragas_embeddings():
     )
     return LangchainEmbeddingsWrapper(lc_emb)
 
+#packs the eval rows into the format that ragas expects as input
 def build_dataset(rows: list[dict]) -> Dataset:
     return Dataset.from_dict(
         {
@@ -50,6 +57,8 @@ def build_dataset(rows: list[dict]) -> Dataset:
         }
     )
 
+#this fn takes the list of eval rows and runs ragas on them.
+#returns one dict per row with all 4 metric scores filled in.
 def run(rows: list[dict]) -> list[dict]:
     if not rows:
         return []

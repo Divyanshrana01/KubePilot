@@ -13,17 +13,24 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
+#this service caches results for 5 different types of data: intents, rag answers,
+#sql queries, sql results, and embeddings. it tries redis first and falls back
+#to an in-memory dict if redis isnt available.
 class QueryCacheService:
     _TIERS = ("intent", "rag_answer", "sql_gen", "sql_result", "embedding")
 
     def __init__(self):
+        #try to connect to redis — if it fails, _redis_client stays None and we use memory
         self._redis_client: Any | None = self._build_redis_client()
+        #in-memory fallback: stores (expiry_timestamp, value) pairs keyed by cache key
         self._memory_store: dict[str, tuple[float, str]] = {}
+        #hit/miss/set counters per tier, useful for debugging cache effectiveness
         self._stats: dict[str, dict[str, int]] = {
             tier: defaultdict(int) for tier in self._TIERS
         }
         self._lock = threading.RLock()
 
+    #tries to connect to upstash redis. returns None if creds are missing or connection fails.
     def _build_redis_client(self) -> Any | None:
         if not settings.upstash_redis_url or not settings.upstash_redis_token:
             logger.info("Redis cache disabled; missing Upstash config")
@@ -36,11 +43,12 @@ class QueryCacheService:
             logger.exception("Failed to initialize Redis cache; using in-memory fallback")
             return None
 
-
+    #builds a cache key by hashing the raw string — so long inputs dont blow up key sizes
     def _key(self, namespace: str, raw: str) -> str:
         hashed = hashlib.sha256(raw.encode("utf-8")).hexdigest()
         return f"{namespace}:{hashed}"
 
+    #key generators for each cache tier — each one normalizes the input before hashing
     def intent_key(self, question: str) -> str:
         return self._key("intent", question.strip().lower())
 
@@ -53,14 +61,16 @@ class QueryCacheService:
     def sql_gen_key(self, question: str) -> str:
         return self._key("sql_gen", question.strip())
 
-
     def sql_result_key(self, sql: str) -> str:
+        #normalise whitespace so "SELECT  *  FROM x" and "SELECT * FROM x" hit the same key
         return self._key("sql_result:v2", " ".join(sql.split()).strip().lower())
 
+    #thread-safe counter increment for tracking hits/misses/sets
     def _record(self, tier: str, field: str) -> None:
         with self._lock:
             self._stats[tier][field] += 1
 
+    #generic get — tries redis first, then falls back to the in-memory store
     def _get(self, tier: str, key: str) -> str | None:
         if self._redis_client is not None:
             try:
@@ -71,6 +81,7 @@ class QueryCacheService:
             except Exception:
                 logger.exception("Redis get failed for tier=%s key=%s", tier, key)
 
+        #redis missed or failed — check local memory store
         with self._lock:
             current = self._memory_store.get(key)
             if current is None:
@@ -78,12 +89,14 @@ class QueryCacheService:
                 return None
             expires_at, value = current
             if expires_at < time.time():
+                #entry has expired — delete it and treat as a miss
                 del self._memory_store[key]
                 self._record(tier, "misses")
                 return None
         self._record(tier, "hits")
         return value
 
+    #generic set — writes to redis if available, otherwise writes to in-memory store
     def _set(self, tier: str, key: str, value: str, ttl_seconds: int) -> None:
         self._record(tier, "sets")
         if self._redis_client is not None:
@@ -93,9 +106,11 @@ class QueryCacheService:
             except Exception:
                 logger.exception("Redis set failed for tier=%s key=%s", tier, key)
 
+        #redis unavailable — store in memory with an expiry timestamp
         with self._lock:
             self._memory_store[key] = (time.time() + ttl_seconds, value)
 
+    #public get/set methods for each cache tier — these are what the rest of the app calls
     def get_intent(self, question: str) -> str | None:
         return self._get("intent", self.intent_key(question))
 
@@ -177,6 +192,7 @@ class QueryCacheService:
             settings.cache_ttl_embeddings,
         )
 
+    #returns a snapshot of hit/miss/set counts and hit rate for each tier
     def stats(self) -> dict[str, dict[str, float | int]]:
         snapshot: dict[str, dict[str, float | int]] = {}
         with self._lock:
@@ -223,4 +239,5 @@ class QueryCacheService:
         return cleared
 
 
+#single shared cache instance used by the whole app
 query_cache = QueryCacheService()

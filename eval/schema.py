@@ -7,7 +7,10 @@ import yaml
 from pydantic import BaseModel, Field, model_validator
 
 
+#the set of possible intents — tells the system what kind of answer to generate
 INTENT = Literal["rag", "sql", "hybrid", "web_fallback"]
+
+#every golden question must declare which feature it is testing
 FEATURE = Literal[
     "baseline",
     "sparse",
@@ -23,6 +26,9 @@ FEATURE = Literal[
     "wild",
 ]
 
+#a Golden is one test case in the eval set.
+#it has a question, the expected sources, the keywords we expect in a good answer,
+#and flags saying whether we expect the baseline to pass or fail.
 class Golden(BaseModel):
     id: str = Field(..., pattern=r"^q-\d{3}$")
     question: str = Field(..., min_length=1)
@@ -43,8 +49,10 @@ class Golden(BaseModel):
         return self
 
 
+#this fn reads the goldens yaml file and returns a list of validated Golden objects.
+#it also checks for duplicate ids and warns if any feature categories have no test cases.
 def load_goldens(path: str | Path) -> list[Golden]:
-    
+
     path = Path(path)
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(raw, list):
@@ -52,10 +60,11 @@ def load_goldens(path: str | Path) -> list[Golden]:
 
     goldens = [Golden.model_validate(entry) for entry in raw]
 
+    #make sure every golden has a unique id — duplicates would cause wrong results in reporting
     ids = [g.id for g in goldens]
     if len(ids) != len(set(ids)):
         duplicates = {i for i in ids if ids.count(i) > 1}
-        raise ValueError(f"Duplicate golden IDs found: {duplicates}") 
+        raise ValueError(f"Duplicate golden IDs found: {duplicates}")
 
     # Warn (don't fail) if some feature categories have no entries.
     # Not every feature needs eval goldens — e.g. dense/sparse/security are

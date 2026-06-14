@@ -8,14 +8,18 @@ DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localho
 MIGRATIONS_DIR = os.path.join(os.path.dirname(__file__), "..", "seed", "migrations")
 
 
+#demo users that get created when you run this script — useful for local testing
 DEMO_USERS = [
     ("agent@demo.local", "agent123", False),
     ("admin@demo.local", "admin123", True),
 ]
 
+#this fn finds all .sql files in the migrations folder and runs them in alphabetical order.
+#this sets up the database schema (tables, indexes, etc).
 def run_migrations(conn: psycopg2.extensions.connection) -> None:
     cur = conn.cursor()
 
+    #sort the files so migrations always run in the right order (001, 002, 003...)
     files = sorted(
         [f for f in os.listdir(MIGRATIONS_DIR) if f.endswith(".sql")]
     )
@@ -32,12 +36,15 @@ def run_migrations(conn: psycopg2.extensions.connection) -> None:
 
     conn.commit()
     cur.close()
-    
 
+
+#this fn inserts the demo users into the users table.
+#it uses ON CONFLICT DO UPDATE so running this twice wont crash — it just updates.
 def seed_users(conn: psycopg2.extensions.connection) -> None:
     cur = conn.cursor()
 
     for username, password, is_admin in DEMO_USERS:
+        #hash the password before storing it in the db
         password_hash = hash_password(password)
 
         cur.execute(
@@ -54,8 +61,9 @@ def seed_users(conn: psycopg2.extensions.connection) -> None:
 
     conn.commit()
     cur.close()
-    
-    
+
+
+#main entry point — connects to the db, runs all migrations, then seeds the demo users
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Seed DB (Lesson 0 - no doc ingestion)"
@@ -79,6 +87,6 @@ def main() -> None:
     logger.info(
         "Note: document ingestion is added in Lesson 1 (lesson-1-naive-rag)."
     )
-    
+
 if __name__ == "__main__":
     main()

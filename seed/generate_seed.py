@@ -17,21 +17,25 @@ Distribution:
 import random
 from datetime import datetime, timedelta
 
+#fix the random seed so the generated data is the same every time you run this
 random.seed(42)
 
 # ── helpers ─────────────────────────────────────────────────────────────────
 
+#picks a random timestamp between start and end and returns it as a sql-formatted string
 def rand_ts(start: datetime, end: datetime) -> str:
     delta = end - start
     secs  = int(delta.total_seconds())
     t     = start + timedelta(seconds=random.randint(0, secs))
     return t.strftime("'%Y-%m-%d %H:%M:%S+00'")
 
+#all generated timestamps will fall within this 2-year window
 START = datetime(2024, 1, 1)
 END   = datetime(2026, 6, 1)
 
 # ── lookup tables ────────────────────────────────────────────────────────────
 
+#all the possible values we randomly pick from when generating each row
 REGIONS = [
     "us-east-1","us-west-2","eu-west-1","eu-central-1",
     "ap-southeast-1","ap-northeast-1","ca-central-1","sa-east-1",
@@ -56,6 +60,7 @@ NODE_TYPES = {
     "g4dn.2xlarge":(8,  32),
 }
 NODE_TYPE_LIST   = list(NODE_TYPES.keys())
+#most nodes are Ready — only a small fraction are unhealthy to make data realistic
 NODE_STATUSES    = ["Ready","Ready","Ready","Ready","NotReady","SchedulingDisabled"]
 
 NAMESPACES = [
@@ -89,6 +94,7 @@ ALERT_NAMES = [
 ]
 ALERT_SEVERITIES = ["INFO","WARN","CRIT","HIGH"]
 
+#template strings for realistic-looking root cause analysis summaries
 RCA_TEMPLATES = [
     "Memory leak in {svc} caused OOM kill; fix: increased limits and patched v{ver}.",
     "Network partition between zones led to split-brain; fix: updated topology spread constraints.",
@@ -109,14 +115,16 @@ ENGINEERS = [
     "peter.miller","quinn.anderson","rose.thomas","sam.jackson","tina.moore",
 ]
 
+#generates a random rca summary string by filling in a template with random service/version/node names
 def rca(svc_list: list) -> str:
     tpl = random.choice(RCA_TEMPLATES)
     return tpl.format(
         svc  = random.choice(svc_list),
         ver  = f"{random.randint(1,5)}.{random.randint(0,20)}.{random.randint(0,9)}",
         node = f"node-{random.randint(100,999)}",
-    ).replace("'", "''")
+    ).replace("'", "''")  #escape single quotes so the sql string doesnt break
 
+#generates a random semver-style version string like "3.14.2"
 def version() -> str:
     return f"{random.randint(1,5)}.{random.randint(0,30)}.{random.randint(0,9)}"
 
@@ -130,7 +138,7 @@ NUM_INCIDENTS    =  1_500
 NUM_ALERTS       =  5_000
 NUM_ONCALL       =  2_500
 
-# clusters
+#generate cluster rows — each cluster has a unique name built from env + region + index
 clusters = []
 used_names: set = set()
 for i in range(1, NUM_CLUSTERS + 1):
@@ -140,6 +148,7 @@ for i in range(1, NUM_CLUSTERS + 1):
     base   = f"{env}-{short}-{i:03d}"
     name   = base
     j = 2
+    #if the name already exists, keep appending a counter until its unique
     while name in used_names:
         name = f"{base}-{j}"; j += 1
     used_names.add(name)
@@ -149,7 +158,7 @@ for i in range(1, NUM_CLUSTERS + 1):
         rand_ts(START, END),
     ))
 
-# nodes
+#generate node rows — each node belongs to a random cluster
 nodes = []
 for i in range(1, NUM_NODES + 1):
     nt         = random.choice(NODE_TYPE_LIST)
@@ -161,7 +170,7 @@ for i in range(1, NUM_NODES + 1):
         rand_ts(START, END),
     ))
 
-# deployments
+#generate deployment rows — each deployment belongs to a random cluster and namespace
 deployments = []
 svc_pool = SERVICES * (NUM_DEPLOYMENTS // len(SERVICES) + 1)
 random.shuffle(svc_pool)
@@ -177,12 +186,13 @@ for i in range(1, NUM_DEPLOYMENTS + 1):
         rand_ts(START, END),
     ))
 
-# pods
+#generate pod rows — each pod belongs to a deployment and runs on a random node
 pod_statuses = ["Running","Running","Running","Pending","Failed","Succeeded","CrashLoopBackOff","Evicted"]
 pods = []
 for i in range(1, NUM_PODS + 1):
     dep_id  = random.randint(1, NUM_DEPLOYMENTS)
     node_id = random.randint(1, NUM_NODES)
+    #inherit the namespace from the deployment this pod belongs to
     ns      = deployments[dep_id - 1][2]
     pods.append((
         i, ns, dep_id,
@@ -191,7 +201,7 @@ for i in range(1, NUM_PODS + 1):
         rand_ts(START, END),
     ))
 
-# incidents
+#generate incident rows — mttr is how many minutes it took to resolve the incident
 incidents = []
 svc_names_flat = [d[1] for d in deployments]
 for i in range(1, NUM_INCIDENTS + 1):
@@ -208,7 +218,7 @@ for i in range(1, NUM_INCIDENTS + 1):
         rca(svc_names_flat),
     ))
 
-# alerts
+#generate alert rows — each alert is fired by a specific pod
 alerts = []
 for i in range(1, NUM_ALERTS + 1):
     pod_id   = random.randint(1, NUM_PODS)
@@ -218,10 +228,10 @@ for i in range(1, NUM_ALERTS + 1):
         random.choice(ALERT_SEVERITIES),
         pod_id,
         random.choice(ALERT_NAMES),
-        random.choice(["TRUE","FALSE","FALSE","FALSE"]),
+        random.choice(["TRUE","FALSE","FALSE","FALSE"]),  #most alerts are not resolved
     ))
 
-# oncall_logs
+#generate oncall log rows — each log entry records who was paged and how fast they responded
 oncall_logs = []
 for i in range(1, NUM_ONCALL + 1):
     incident_id   = random.randint(1, NUM_INCIDENTS)
@@ -237,12 +247,14 @@ for i in range(1, NUM_ONCALL + 1):
 
 # ── render SQL ───────────────────────────────────────────────────────────────
 
-CHUNK = 500  # rows per VALUES block
+CHUNK = 500  # rows per VALUES block — keeps each insert statement a manageable size
 
+#helper that splits a list into chunks of size n
 def chunked(lst, n):
     for k in range(0, len(lst), n):
         yield lst[k:k+n]
 
+#build the sql file as a list of strings then join them at the end
 lines = []
 W = lines.append
 
@@ -354,6 +366,7 @@ CREATE INDEX idx_oncall_incident      ON oncall_logs(incident_id);
 -- clusters (50 rows)
 """)
 
+#write each table's data in chunks of 500 rows per INSERT statement
 for chunk in chunked(clusters, CHUNK):
     W("INSERT INTO clusters (cluster_id, name, region, envornment, k8s_version, created_at) VALUES")
     rows = []
@@ -416,6 +429,7 @@ for chunk in chunked(oncall_logs, CHUNK):
     W(",\n".join(rows) + ";")
     W("")
 
+#join all the sql strings into one big file and write it to disk
 sql = "\n".join(lines)
 
 out_path = "seed/migrations/003_seed_k8s_ops.sql"

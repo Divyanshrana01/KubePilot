@@ -23,7 +23,7 @@ async def _ping_postgres() -> bool:
     except Exception as exc:
         logger.debug(f"PostgreSQL health check failed: {exc}")
         return False
-    
+
 # check if Qdrant is up or not.
 async def _ping_qdrant() -> bool:
     try:
@@ -34,7 +34,7 @@ async def _ping_qdrant() -> bool:
     except Exception as exc:
         logger.debug(f"Qdrant health check failed: {exc}")
         return False
-    
+
 # check if redis is up or not.
 async def _ping_redis() -> bool:
     try:
@@ -46,7 +46,7 @@ async def _ping_redis() -> bool:
         logger.debug(f"Redis health check failed: {exc}")
         return False
 
-# check if  openAI is up or not.
+# check if openAI is up or not.
 async def _ping_openai() -> bool:
     try:
         from openai import AsyncOpenAI
@@ -58,6 +58,8 @@ async def _ping_openai() -> bool:
         return False
 
 
+#health check endpoint — pings all 4 dependencies at the same time using asyncio.gather
+#if even one is down, the overall status becomes "degraded" instead of "ok"
 @router.get("/admin/health")
 async def health_check() -> dict[str, Any]:
     """Ping every dependency and report status.
@@ -66,6 +68,7 @@ async def health_check() -> dict[str, Any]:
         Dict with overall status and per-dependency booleans.
     """
 
+    #run all 4 pings in parallel so the health check responds fast
     results = await asyncio.gather(
         _ping_postgres(),
         _ping_qdrant(),
@@ -74,6 +77,7 @@ async def health_check() -> dict[str, Any]:
         return_exceptions=True,
     )
 
+    #if any ping threw an exception instead of returning True/False, treat it as down
     postgres_ok = bool(results[0]) if not isinstance(results[0], Exception) else False
     qdrant_ok = bool(results[1]) if not isinstance(results[1], Exception) else False
     redis_ok = bool(results[2]) if not isinstance(results[2], Exception) else False

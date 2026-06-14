@@ -20,3 +20,5 @@ eval/results/
 
 # Qdrant local binary + storage
 .qdrant/
+
+.claude

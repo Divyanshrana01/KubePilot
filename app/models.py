@@ -48,9 +48,6 @@ class ResponseMetadata(BaseModel):
     route: str = "rag"
     retrieved_chunks: list[RetrievedChunkPreview] = Field(default_factory=list)
     cache_hit: bool = False
-    reflection_iterations: int = 0
-    reflection_score: float | None = None
-    refined_question: str | None = None
 
 
 #when the system wants to run SQL, it stores it here until the user approves it
@@ -79,12 +76,8 @@ class QueryRequest(BaseModel):
         max_length=2000,
         description="User question",
     )
-    enable_rerank: bool = False
     top_k: int = Field(default=5, ge=1, le=50)
-    enable_hyde: bool = False
     search_mode: Literal["dense", "sparse", "hybrid"] = "dense"
-    enable_crag: bool = True
-    enable_self_reflective: bool = False
 
     #same injection check as ChatRequest but for the question field
     @field_validator("question")
@@ -115,19 +108,3 @@ class RetrievedChunk(BaseModel):
     text: str
     source: str
     score: float = 0.0
-
-#crag checks each retrieved chunk and decides if it's actually relevant to the question
-class CRAGEvaluation(BaseModel):
-    relevance_score: float = 0.0
-    relevance_label: str = ""
-    confidence: float = 0.0
-    reasoning: str = ""
-
-#self-rag grades the generated answer and says whether it needs to be rewritten
-class ReflectionResult(BaseModel):
-    """Self-RAG reflection on a generated answer."""
-
-    reflection_score: float = 0.0
-    needs_regeneration: bool = False
-    refined_question: str = ""
-    reasoning: str = ""

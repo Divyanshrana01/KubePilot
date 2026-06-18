@@ -20,9 +20,9 @@ def ensure_collection() -> None:
     client = get_client()
     existing = {c.name for c in client.get_collections().collections}
 
-    if settings.qdrant_collection not in existing: # type: ignore
+    if settings.qdrant_collection_name not in existing: # type: ignore
         client.create_collection(
-            collection_name=settings.qdrant_collection,
+            collection_name=settings.qdrant_collection_name,
             vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
         )
 
@@ -39,12 +39,12 @@ def upsert_chunks(chunks: list[RetrievedChunk], embeddings: list[list[float]]) -
         )
         for chunk, embedding in zip(chunks, embeddings, strict=True)
     ]
-    client.upsert(collection_name=settings.qdrant_collection, points=points)
+    client.upsert(collection_name=settings.qdrant_collection_name, points=points)
 
 def search(query_embedding: list[float], top_k: int = 5) -> list[RetrievedChunk]:
     client = get_client()
     results = client.query_points(
-        collection_name=settings.qdrant_collection,
+        collection_name=settings.qdrant_collection_name,
         query=query_embedding,
         limit=top_k,
         with_payload=True,
@@ -64,7 +64,7 @@ def _build_sparse_index():
     from app.services.sparse_vector_service import SparseVectorIndex
     client = get_client()
     all_points, _next_page = client.scroll(
-        collection_name=settings.qdrant_collection,
+        collection_name=settings.qdrant_collection_name,
         limit=10000,
         with_payload=True,
         with_vectors=False,

@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 from app.config import settings
 from app.models import ChatResponse, RetrievedChunk
-from app.services.llm_service import run_rag_with_trace_no_cache
+from app.services.rag_service import run_rag_with_trace_no_cache
 
 
 #raised when a golden question's intent is not supported by the current invoker.

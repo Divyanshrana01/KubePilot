@@ -4,6 +4,7 @@ import os
 
 from datasets import Dataset
 from langchain_openai import OpenAIEmbeddings
+from openai import OpenAI
 from ragas import evaluate
 from ragas.embeddings import LangchainEmbeddingsWrapper
 from ragas.llms import llm_factory
@@ -35,7 +36,8 @@ METRICS = [
 def _get_ragas_llm():
     """Create a Ragas-compatible LLM using app settings."""
     os.environ.setdefault("OPENAI_API_KEY", settings.openai_api_key)
-    return llm_factory(settings.llm_model_grader)
+    client = OpenAI(api_key=settings.openai_api_key)
+    return llm_factory(settings.llm_model_grader, client=client)
 
 #creates a ragas-compatible embedding wrapper using our app's embedding model
 def _get_ragas_embeddings():

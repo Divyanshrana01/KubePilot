@@ -78,8 +78,8 @@ class QueryCacheService:
                 if value is not None:
                     self._record(tier, "hits")
                     return str(value)
-            except Exception:
-                logger.exception("Redis get failed for tier=%s key=%s", tier, key)
+            except Exception as exc:
+                logger.warning("Redis get failed for tier=%s key=%s: %s", tier, key, exc)
 
         #redis missed or failed — check local memory store
         with self._lock:
@@ -103,8 +103,8 @@ class QueryCacheService:
             try:
                 self._redis_client.set(key, value, ex=ttl_seconds)
                 return
-            except Exception:
-                logger.exception("Redis set failed for tier=%s key=%s", tier, key)
+            except Exception as exc:
+                logger.warning("Redis set failed for tier=%s key=%s: %s", tier, key, exc)
 
         #redis unavailable — store in memory with an expiry timestamp
         with self._lock:

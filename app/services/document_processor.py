@@ -13,8 +13,9 @@ class DocumentProcessor:
     def __init__(self):
         #set up the pdf pipeline to use apple silicon MPS for faster processing
         pipeline_options = PdfPipelineOptions()
+        # MPS doesn't support float64 which docling's layout model requires — use CPU instead.
         pipeline_options.accelerator_options = AcceleratorOptions(
-            num_threads=8, device=AcceleratorDevice.MPS
+            num_threads=8, device=AcceleratorDevice.CPU
         )
         #the converter handles the actual pdf parsing
         self.converter = DocumentConverter(

@@ -1,52 +1,180 @@
+# One-shot script: apply SQL migrations, seed demo users, and ingest documents into the vector store.
+# Run via `python -m scripts.seed_db` or `make seed`.
+
 import argparse
 import os
+import random
+import time
+from pathlib import Path
+
 import psycopg2
 from loguru import logger
+
 from app.middleware.auth import hash_password
 
+
+# Falls back to the local dev database if DATABASE_URL is not set in the environment.
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/adv_rag")
 MIGRATIONS_DIR = os.path.join(os.path.dirname(__file__), "..", "seed", "migrations")
+DOCS_DIR = os.path.join(os.path.dirname(__file__), "..", "seed", "docs")
 
-
-#demo users that get created when you run this script — useful for local testing
+# Tuple layout: (username, password_plaintext, is_admin)
 DEMO_USERS = [
     ("agent@demo.local", "agent123", False),
     ("admin@demo.local", "admin123", True),
 ]
 
-#this fn finds all .sql files in the migrations folder and runs them in alphabetical order.
-#this sets up the database schema (tables, indexes, etc).
-def run_migrations(conn: psycopg2.extensions.connection) -> None:
-    cur = conn.cursor()
+SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".html", ".htm", ".txt", ".md"}
+# Fixed seed so noisy-data samples are deterministic across repeated runs.
+SAMPLE_SEED = 42
 
-    #sort the files so migrations always run in the right order (001, 002, 003...)
-    files = sorted(
-        [f for f in os.listdir(MIGRATIONS_DIR) if f.endswith(".sql")]
+
+
+def _collect_files(subdir: str) -> list[Path]:
+    """Recursively collect all supported documents from a subdirectory of DOCS_DIR.
+    Returns an empty list if the subdirectory doesn't exist yet (e.g. before make seed-data)."""
+    root = Path(DOCS_DIR) / subdir
+    if not root.exists():
+        return []
+    return sorted(
+        p for p in root.rglob("*")
+        if p.is_file()
+        and p.suffix.lower() in SUPPORTED_EXTENSIONS
+        and p.name != ".gitkeep"  # placeholder files used to keep empty dirs in git
     )
 
+def _select_corpus(noise_sample_size: int | str) -> tuple[list[Path], list[Path]]:
+    """Build the final ingestion file lists for both true-signal and noisy corpora.
+    Applies random sampling to the noisy set when a numeric limit is given, and folds
+    in any legacy top-level docs so older seed layouts remain compatible."""
+    true_files = _collect_files("true_data")
+    all_noisy = _collect_files("noisy_data")
+
+    # Backward compat: docs dropped directly into DOCS_DIR (before the true_data/ subdir existed)
+    # are treated as true signal so older seed layouts still work without migration.
+    legacy_files = [
+        p for p in Path(DOCS_DIR).iterdir()
+        if p.is_file()
+        and p.suffix.lower() in SUPPORTED_EXTENSIONS
+        and p.name != ".gitkeep"
+    ]
+
+    if legacy_files:
+        logger.info("Found {} legacy top-level docs (treating as true signal)", len(legacy_files))
+
+    true_files = legacy_files + true_files
+
+    if noise_sample_size == "all":
+        noisy_files = all_noisy
+    else:
+        n = int(noise_sample_size)
+        if n <= 0 or n >= len(all_noisy):
+            noisy_files = all_noisy if n > 0 else []
+        else:
+            rng = random.Random(SAMPLE_SEED)
+            noisy_files = rng.sample(all_noisy, n)
+            noisy_files.sort()
+    return true_files, noisy_files
+
+
+def seed_docs(noise_sample_size: int | str = 150) -> dict:
+    """Process and embed all seed documents, then upsert their chunks into the vector store.
+    Returns a counters dict with keys true_ingested, noisy_ingested, failed, and chunks."""
+    from app.models import RetrievedChunk
+    from app.services.document_processor import DocumentProcessor
+    from app.services.embedding_service import embed_texts
+    from app.services.vector_store import upsert_chunks
+
+    processor = DocumentProcessor()
+    true_files, noisy_files = _select_corpus(noise_sample_size)
+    total = len(true_files) + len(noisy_files)
+
+    logger.info("=" * 60)
+    logger.info("INGESTION PLAN")
+    logger.info("  true_data  : {} files (full signal)", len(true_files))
+    logger.info("  noisy_data : {} files (sample={})", len(noisy_files), noise_sample_size)
+    logger.info("  total      : {} files", total)
+    logger.info("=" * 60)
+
+    
+    if total == 0:
+        logger.warning("No files found to ingest — did you run `make seed-data`?")
+        return {"true_ingested": 0, "noisy_ingested": 0, "failed": 0, "chunks": 0}
+
+    counters = {"true_ingested": 0, "noisy_ingested": 0, "failed": 0, "chunks": 0}
+    t0 = time.time()
+
+
+    for idx, src in enumerate(true_files, start=1):
+        _ingest_one(processor, src, idx, total, counters, embed_texts, upsert_chunks, RetrievedChunk)
+        if counters["chunks"] > 0 and idx == len(true_files):
+            logger.info("✓ All {} true (signal) files done", len(true_files))
+
+    for jdx, src in enumerate(noisy_files, start=1):
+        idx = len(true_files) + jdx
+        _ingest_one(processor, src, idx, total, counters, embed_texts, upsert_chunks, RetrievedChunk)
+
+    elapsed = time.time() - t0
+    logger.info("=" * 60)
+    logger.info("INGESTION COMPLETE in {:.1f} min", elapsed / 60)
+    logger.info("  true_data ingested  : {}", counters["true_ingested"])
+    logger.info("  noisy_data ingested : {}", counters["noisy_ingested"])
+    logger.info("  failed (skipped)    : {}", counters["failed"])
+    logger.info("  total chunks upserted: {}", counters["chunks"])
+    logger.info("=" * 60)
+
+    return counters
+
+
+def _ingest_one(processor, src: Path, idx: int, total: int, counters: dict,
+                embed_texts_fn, upsert_chunks_fn, RetrievedChunk) -> None:
+    """Parse a single document into chunks, embed them, and upsert into the vector store.
+    Updates counters in-place; logs a warning and increments 'failed' if any step raises."""
+    # Determine corpus membership from the path so the counter key matches the subdir name.
+    label = "true" if "true_data" in str(src) else "noisy"
+    logger.info("[{}/{}] start {} {}", idx, total, label, src.name)
+    try:
+        chunks_meta = processor.process_document(str(src))
+        if not chunks_meta:
+            logger.warning("[{}/{}] {} {} → 0 chunks (skipped)", idx, total, label, src.name)
+            counters["failed"] += 1
+            return
+        chunks = [RetrievedChunk(text=c["text"], source=c["source"]) for c in chunks_meta]
+        texts = [c.text for c in chunks]
+        embeddings = embed_texts_fn(texts)
+        upsert_chunks_fn(chunks, embeddings)
+        counters["chunks"] += len(chunks)
+        counters[f"{label}_ingested"] += 1
+        if idx % 10 == 0 or idx == total:
+            logger.info("  [{}/{}] progress — {} chunks so far",idx, total, counters["chunks"])
+
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[{}/{}] FAILED {} {}: {}", idx, total, label, src.name, type(exc).__name__)
+        counters["failed"] += 1
+
+
+def run_migrations(conn: psycopg2.extensions.connection) -> None:
+    """Execute all .sql migration files in MIGRATIONS_DIR against the given connection.
+    Files are run in alphabetical order so numeric prefixes (e.g. 001_, 002_) control sequencing."""
+    # Sorted order ensures migrations run in sequence (files are named with numeric prefixes).
+    cur = conn.cursor()
+    files = sorted([f for f in os.listdir(MIGRATIONS_DIR) if f.endswith(".sql")])
     for filename in files:
         path = os.path.join(MIGRATIONS_DIR, filename)
-
         with open(path) as f:
             sql = f.read()
-
         logger.info("Running migration: {}", filename)
-
         cur.execute(sql)
-
     conn.commit()
     cur.close()
 
-
-#this fn inserts the demo users into the users table.
-#it uses ON CONFLICT DO UPDATE so running this twice wont crash — it just updates.
 def seed_users(conn: psycopg2.extensions.connection) -> None:
+    """Insert the DEMO_USERS into the users table, hashing passwords before storage.
+    Uses upsert so the script is safe to re-run without producing duplicate rows."""
     cur = conn.cursor()
-
     for username, password, is_admin in DEMO_USERS:
-        #hash the password before storing it in the db
         password_hash = hash_password(password)
-
+        # Upsert so re-running the seed doesn't fail on duplicate usernames.
         cur.execute(
             """
             INSERT INTO users (username, password_hash, is_admin)
@@ -57,36 +185,46 @@ def seed_users(conn: psycopg2.extensions.connection) -> None:
             """,
             (username, password_hash, is_admin),
         )
-        logger.info("Seeded user: {} (admin: {})", username, is_admin)
-
+        logger.info("Seeded user: {} (admin={})", username, is_admin)
     conn.commit()
     cur.close()
 
-
-#main entry point — connects to the db, runs all migrations, then seeds the demo users
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Seed DB (Lesson 0 - no doc ingestion)"
+    """CLI entry point: parse args, run migrations, seed users, then optionally ingest documents.
+    Pass --no-ingest to stop after DB setup, or --noise-sample N (or 'all') to control noisy doc volume."""
+    parser = argparse.ArgumentParser(description="Seed DB + ingest documents")
+    parser.add_argument(
+        "--no-ingest", action="store_true",
+        help="Run migrations + users only; skip vector-store ingestion",
     )
-
-    parser.parse_args()
+    parser.add_argument(
+        "--noise-sample", default="150",
+        help="Number of noisy docs to sample (default 150). Use 0 or 'all'.",
+    )
+    args = parser.parse_args()
 
     logger.info("Connecting to database...")
-
     conn = psycopg2.connect(DATABASE_URL)
-
     logger.info("Running migrations...")
     run_migrations(conn)
-
     logger.info("Seeding demo users...")
     seed_users(conn)
-
     conn.close()
-
     logger.info("DB seeding done.")
-    logger.info(
-        "Note: document ingestion is added in Lesson 1 (lesson-1-naive-rag)."
-    )
+
+    if args.no_ingest:
+        logger.info("--no-ingest set; skipping doc ingestion.")
+        return
+
+    # Parse noise-sample arg (int or 'all')
+    noise_arg: int | str = args.noise_sample
+    if noise_arg != "all":
+        try:
+            noise_arg = int(noise_arg)
+        except ValueError:
+            raise SystemExit(f"--noise-sample must be int or 'all', got {noise_arg!r}")
+
+    seed_docs(noise_sample_size=noise_arg)
 
 if __name__ == "__main__":
     main()

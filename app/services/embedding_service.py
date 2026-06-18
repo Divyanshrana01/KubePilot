@@ -8,7 +8,7 @@ from app.services.query_cache_service import query_cache
 openai_client = OpenAI(api_key=settings.openai_api_key)
 
 #this fn takes a list of text strings and returns a list of embeddings (float vectors).
-#it checks the cache first for each text — only calls openai for the ones that aren't cached yet.
+#it checks the cache first for each text, only calls openai for the ones that aren't cached yet.
 #this saves money and speeds things up a lot when the same texts are embedded repeatedly.
 def embed_texts(texts: list[str], model: str | None = None) -> list[list[float]]:
     if not texts:

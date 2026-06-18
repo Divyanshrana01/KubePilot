@@ -58,7 +58,7 @@ async def _ping_openai() -> bool:
         return False
 
 
-#health check endpoint — pings all 4 dependencies at the same time using asyncio.gather
+#health check endpoint, pings all 4 dependencies at the same time using asyncio.gather
 #if even one is down, the overall status becomes "degraded" instead of "ok"
 @router.get("/admin/health")
 async def health_check() -> dict[str, Any]:

@@ -5,7 +5,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-#shared redis client — only created once and reused across all requests
+#shared redis client, only created once and reused across all requests
 _redis_client: Redis | None = None
 
 def get_redis_client() -> Redis:
@@ -29,8 +29,8 @@ class RateLimiter:
         now = time.time()
         window_start = now - self.window_seconds
 
-        #fail open if redis is unreachable/misconfigured — a broken rate limiter
-        #should never take down the endpoints it's meant to protect
+        #fail open if redis is unreachable or misconfigured, a broken rate limiter
+        #should never take down the endpoints its supposed to protect
         try:
             client = get_redis_client()
             #use a pipeline to run all 4 redis commands in one round trip
@@ -51,14 +51,14 @@ class RateLimiter:
         return allowed, remaining, request_count
 
 
-#check rate limit by ip address + route — used on auth endpoints to block repeated attempts
+#check rate limit by ip address + route, used on auth endpoints to block repeated attempts
 def is_allowed_ip(ip: str, route: str, limit: int, window_seconds: int) -> tuple[bool, int, int]:
     limiter = RateLimiter(max_requests=limit, window_seconds=window_seconds)
     key = f"rate_limit:ip:{ip}:{route}"
     return limiter.is_allowed(key)
 
 
-#check rate limit by user id — used on api endpoints after the user is logged in
+#check rate limit by user id, used on api endpoints after the user is logged in
 def is_allowed_user(user_id: str, limit: int = 20, window_seconds: int = 60) -> tuple[bool, int, int]:
     limiter = RateLimiter(max_requests=limit, window_seconds=window_seconds)
     key = f"rate_limit:user:{user_id}"

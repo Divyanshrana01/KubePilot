@@ -19,14 +19,17 @@ def get_redis_client() -> Redis:
     return _redis_client
 
 
+#tracks how many tokens a user has burned today and stops them once they hit the daily cap
 class TokenBudget:
     def __init__(self, max_tokens: int):
         self.max_tokens = max_tokens
 
+    #one redis key per user per day, so it resets automatically when the date changes
     def _key(self, user_id: str) -> str:
         today = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d")
         return f"token_budget:{user_id}:{today}"
 
+    #call this before the llm call to see if the user has enough tokens left
     def check_budget(self, user_id: str, estimated_tokens: int) -> tuple[bool, int]:
         client = get_redis_client()
         key = self._key(user_id)
@@ -36,12 +39,13 @@ class TokenBudget:
         ok = estimated_tokens <= remaining
         return ok, remaining
 
+    #call this after the llm call with the real token count to update the running total
     def consume(self, user_id: str, actual_tokens: int) -> dict:
         client = get_redis_client()
         key = self._key(user_id)
         used = client.incrby(key, actual_tokens)
 
-        # Set TTL to seconds-until-midnight on first write
+        # set ttl so the key expires at midnight, only need to do this once per day
         ttl = client.ttl(key)
         if ttl == -1:
             now = datetime.datetime.now(datetime.UTC)

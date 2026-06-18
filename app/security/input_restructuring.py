@@ -1,4 +1,5 @@
-"""L5: Input restructuring — tiktoken-based truncate or summarize."""
+"""Shrinks long questions down to fit the model's input limit, either by cutting them
+off or summarizing them, depending on how far over the limit they are."""
 
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
+#counts tokens with tiktoken, falls back to a rough word count if tiktoken isnt available
 def count_tokens(text: str) -> int:
     """Count tokens using tiktoken if available, otherwise rough word count."""
     try:
@@ -39,11 +41,9 @@ def truncate_text(text: str, max_tokens: int = 3_000) -> tuple[str, str]:
         return truncated, "truncated"
 
 
+#keeps adding whole sentences one by one until adding another would go over the limit
 def summarize_text(text: str, target_tokens: int = 3_000) -> tuple[str, str]:
-    """Greedy sentence selection to fit within target_tokens.
-
-    Returns (summary, method_label).
-    """
+    """Returns (summary, method_label)."""
     import re
 
     sentences = re.split(r"(?<=[.!?])\s+", text)
@@ -60,16 +60,10 @@ def summarize_text(text: str, target_tokens: int = 3_000) -> tuple[str, str]:
     return " ".join(summary_parts), "summarized"
 
 
+#picks how to shrink the input based on how far over the limit it is:
+#under the limit, leave it alone. up to 2x over, just truncate. way over, summarize instead.
 def restructure_input(text: str) -> tuple[str, str]:
-    """Apply input restructuring based on token count.
-
-    Rules from PRD:
-    - ≤ 3000 tokens: original
-    - 3000–6000 tokens: truncated to 3000
-    - > 6000 tokens: summarized to 3000
-
-    Returns (restructured_text, method_label).
-    """
+    """Returns (restructured_text, method_label)."""
     tokens = count_tokens(text)
     max_input = settings.max_input_tokens
     reserved = settings.reserved_context_tokens

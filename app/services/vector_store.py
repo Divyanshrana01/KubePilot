@@ -16,6 +16,7 @@ VECTOR_SIZE = 1536
 def get_client() -> QdrantClient:
     return QdrantClient(url=settings.qdrant_url, timeout=30)
 
+#creates the qdrant collection if it doesnt exist yet, safe to call this every time before writing
 def ensure_collection() -> None:
     client = get_client()
     existing = {c.name for c in client.get_collections().collections}
@@ -41,6 +42,7 @@ def upsert_chunks(chunks: list[RetrievedChunk], embeddings: list[list[float]]) -
     ]
     client.upsert(collection_name=settings.qdrant_collection_name, points=points)
 
+#plain dense search, sends the embedding to qdrant and gets back the closest chunks
 def search(query_embedding: list[float], top_k: int = 5) -> list[RetrievedChunk]:
     client = get_client()
     results = client.query_points(
@@ -60,6 +62,8 @@ def search(query_embedding: list[float], top_k: int = 5) -> list[RetrievedChunk]
     ]
 
 
+#pulls every chunk out of qdrant and builds a fresh tf-idf index over them for keyword search
+#this is rebuilt on every call, fine for our doc count but wouldnt scale to a huge corpus
 def _build_sparse_index():
     from app.services.sparse_vector_service import SparseVectorIndex
     client = get_client()
@@ -87,6 +91,7 @@ def sparse_search(query_text: str, top_k: int = 5) -> list[RetrievedChunk]:
     return sparse_index.search(query_text, top_k=top_k)
 
 
+#runs both dense and sparse search then merges the two ranked lists into one with rrf
 def hybrid_search(
     query_embedding: list[float],
     query_text: str,

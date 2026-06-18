@@ -40,7 +40,9 @@ def _get_scanners() -> list[Any]:
     return _scanners
 
 
+#runs the user's question through all the input scanners, returns whats safe and whats not
 def scan_input(text: str) -> dict[str, Any]:
+    #if llm-guard isnt installed just let everything through, dont block users over a missing dep
     if _SCAN_PROMPT is None:
         return {
             "is_safe": True,
@@ -69,6 +71,7 @@ def scan_input(text: str) -> dict[str, Any]:
         }
 
 
+#simple wrapper around scan_input thats easier to call from the api route
 def check_input_safe(text: str) -> tuple[bool, str | None]:
     result = scan_input(text)
     if result["is_safe"]:

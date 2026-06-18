@@ -8,6 +8,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+#backup regex patterns in case llm-guard isnt installed, used to blank out common pii
 _PII_PATTERNS: list[tuple[str, str]] = [
     (r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b", "[REDACTED_EMAIL]"),
     (r"\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b", "[REDACTED_PHONE]"),
@@ -18,6 +19,7 @@ _PII_PATTERNS: list[tuple[str, str]] = [
 
 
 
+#tries to import llm-guard's scan_output fn, returns None if the package isnt there
 def _load_moderation() -> Any | None:
     try:
         from llm_guard import scan_output
@@ -40,6 +42,7 @@ def _get_pii_scanners() -> list[Any]:
     return _pii_scanners
 
 
+#same lazy-build pattern as above but for toxicity + banned topics
 def _get_moderation_scanners() -> list[Any]:
     global _moderation_scanners
     if _moderation_scanners is not None:
@@ -54,6 +57,7 @@ def _get_moderation_scanners() -> list[Any]:
     ]
     return _moderation_scanners
 
+#blanks out emails, phone numbers, card numbers and ips from the llm's answer before its sent back
 def redact_pii(text: str) -> str:
     if _SCAN_OUTPUT is not None:
         try:

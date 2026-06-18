@@ -98,7 +98,7 @@ def seed_docs(noise_sample_size: int | str = 150) -> dict:
 
     
     if total == 0:
-        logger.warning("No files found to ingest — did you run `make seed-data`?")
+        logger.warning("No files found to ingest, did you run `make seed-data`?")
         return {"true_ingested": 0, "noisy_ingested": 0, "failed": 0, "chunks": 0}
 
     counters = {"true_ingested": 0, "noisy_ingested": 0, "failed": 0, "chunks": 0}
@@ -146,7 +146,7 @@ def _ingest_one(processor, src: Path, idx: int, total: int, counters: dict,
         counters["chunks"] += len(chunks)
         counters[f"{label}_ingested"] += 1
         if idx % 10 == 0 or idx == total:
-            logger.info("  [{}/{}] progress — {} chunks so far",idx, total, counters["chunks"])
+            logger.info("  [{}/{}] progress, {} chunks so far",idx, total, counters["chunks"])
 
     except Exception as exc:  # noqa: BLE001
         logger.warning("[{}/{}] FAILED {} {}: {}", idx, total, label, src.name, type(exc).__name__)

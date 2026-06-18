@@ -36,7 +36,7 @@ def print_table(payload: dict) -> None:
     Args:
         payload: The full result payload dict (profile, mode, rows, aggregate).
     """
-    print(f"\n## Eval — profile={payload['profile']} mode={payload['mode']}")
+    print(f"\n## Eval, profile={payload['profile']} mode={payload['mode']}")
     print(f"Skipped: {len(payload['skipped'])}")
     print()
     print(
@@ -63,14 +63,14 @@ def print_table(payload: dict) -> None:
         )
 
     if not payload["rows"]:
-        print("(no rows evaluated — all goldens skipped)")
+        print("(no rows evaluated, all goldens skipped)")
         return
 
     #print the aggregate row at the bottom in bold
     a = payload["aggregate"]
 
     print(
-        f"| **AGG** | — | **{a['faithfulness']}** | "
+        f"| **AGG** | - | **{a['faithfulness']}** | "
         f"**{a['context_precision']}** | **{a['context_recall']}** | "
         f"**{a['answer_relevancy']}** | "
         f"violations={a['forbidden_violations']} |"

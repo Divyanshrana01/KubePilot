@@ -13,7 +13,7 @@ def _get_db_conn():
     return psycopg2.connect(settings.database_url)
 
 
-#register endpoint — creates a new user account and returns a jwt token
+#register endpoint, creates a new user account and returns a jwt token
 #rate limited to 3 registrations per hour per ip to stop bots signing up in bulk
 @router.post("/auth/register", status_code=status.HTTP_201_CREATED)
 async def register(request: Request, body: dict) -> dict:
@@ -36,7 +36,7 @@ async def register(request: Request, body: dict) -> dict:
     if not username or not password:
         raise HTTPException(status_code=400, detail="username and password required")
 
-    #hash the password before storing it — never store plain text passwords
+    #hash the password before storing it, never store plain text passwords
     password_hash = hash_password(password)
     conn = _get_db_conn()
     cur = conn.cursor()
@@ -60,7 +60,7 @@ async def register(request: Request, body: dict) -> dict:
     return {"token": token}
 
 
-#login endpoint — checks credentials and returns a jwt token if they match
+#login endpoint, checks credentials and returns a jwt token if they match
 #rate limited to 5 attempts per minute per ip to slow down brute force attacks
 @router.post("/auth/login")
 async def login(request: Request, body: dict) -> dict:

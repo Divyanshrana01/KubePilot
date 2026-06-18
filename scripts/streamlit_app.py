@@ -17,7 +17,7 @@ import streamlit as st
 # Constants
 # ---------------------------------------------------------------------------
 
-# Root of the repo — used to find eval/results/*.json
+# Root of the repo, used to find eval/results/*.json
 _REPO_ROOT = Path(__file__).parent.parent
 
 USE_CASES: dict[str, dict[str, Any]] = {
@@ -706,7 +706,7 @@ def _query_section(base_url: str, lesson_info: dict) -> None:
         placeholder="e.g. How many P1 incidents last month? | What does imagePullPolicy: Always mean?",
     )
 
-    # Feature toggles — hide controls for flags not in this lesson's schema
+    # Feature toggles, hide controls for flags not in this lesson's schema
     with st.expander("⚙️ RAG Feature Toggles", expanded=True):
         # search_mode only shown if API supports it (L2+)
         has_search_mode = not available_flags or "search_mode" in available_flags
@@ -1154,7 +1154,7 @@ def _eval_dashboard_section() -> None:
     st.dataframe(table_rows, width="stretch", hide_index=True, height=420)
 
     # -------------------------------------------------------------------------
-    # Drill-down — full detail for one golden
+    # Drill-down, full detail for one golden
     # -------------------------------------------------------------------------
     st.markdown("---")
     st.subheader("🔍 Drill-down")

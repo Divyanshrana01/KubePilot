@@ -8,6 +8,7 @@ from app.services.rag_service import run_rag
 
 router = APIRouter(tags=["query"])
 
+#main endpoint the ui calls to ask a question, needs a logged in user, just forwards to run_rag
 @router.post("/query",response_model=ChatResponse)
 async def query(
     body: QueryRequest,

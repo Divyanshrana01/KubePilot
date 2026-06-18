@@ -11,9 +11,9 @@ from loguru import logger
 #it uses docling to parse the pdf and then splits it up using a hybrid chunker.
 class DocumentProcessor:
     def __init__(self):
-        #set up the pdf pipeline to use apple silicon MPS for faster processing
         pipeline_options = PdfPipelineOptions()
-        # MPS doesn't support float64 which docling's layout model requires — use CPU instead.
+        # tried running this on apple silicon's MPS but docling's layout model needs float64
+        # and MPS doesnt support that, so we stick with CPU here
         pipeline_options.accelerator_options = AcceleratorOptions(
             num_threads=8, device=AcceleratorDevice.CPU
         )

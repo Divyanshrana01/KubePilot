@@ -7,7 +7,7 @@ import yaml
 from pydantic import BaseModel, Field, model_validator
 
 
-#the set of possible intents — tells the system what kind of answer to generate
+#the set of possible intents, tells the system what kind of answer to generate
 INTENT = Literal["rag", "sql", "hybrid", "web_fallback"]
 
 #every golden question must declare which feature it is testing
@@ -60,14 +60,14 @@ def load_goldens(path: str | Path) -> list[Golden]:
 
     goldens = [Golden.model_validate(entry) for entry in raw]
 
-    #make sure every golden has a unique id — duplicates would cause wrong results in reporting
+    #make sure every golden has a unique id, duplicates would cause wrong results in reporting
     ids = [g.id for g in goldens]
     if len(ids) != len(set(ids)):
         duplicates = {i for i in ids if ids.count(i) > 1}
         raise ValueError(f"Duplicate golden IDs found: {duplicates}")
 
     # Warn (don't fail) if some feature categories have no entries.
-    # Not every feature needs eval goldens — e.g. dense/sparse/security are
+    # Not every feature needs eval goldens, e.g. dense/sparse/security are
     # demo-only and intentionally excluded from the eval-progression set.
     present_features = {g.demonstrates_feature for g in goldens}
     all_features = set(FEATURE.__args__)  # type: ignore[attr-defined]

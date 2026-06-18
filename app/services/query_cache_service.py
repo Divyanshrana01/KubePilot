@@ -20,7 +20,7 @@ class QueryCacheService:
     _TIERS = ("intent", "rag_answer", "sql_gen", "sql_result", "embedding")
 
     def __init__(self):
-        #try to connect to redis — if it fails, _redis_client stays None and we use memory
+        #try to connect to redis, if it fails _redis_client stays None and we use memory instead
         self._redis_client: Any | None = self._build_redis_client()
         #in-memory fallback: stores (expiry_timestamp, value) pairs keyed by cache key
         self._memory_store: dict[str, tuple[float, str]] = {}
@@ -43,12 +43,12 @@ class QueryCacheService:
             logger.exception("Failed to initialize Redis cache; using in-memory fallback")
             return None
 
-    #builds a cache key by hashing the raw string — so long inputs dont blow up key sizes
+    #builds a cache key by hashing the raw string, so long inputs dont blow up key sizes
     def _key(self, namespace: str, raw: str) -> str:
         hashed = hashlib.sha256(raw.encode("utf-8")).hexdigest()
         return f"{namespace}:{hashed}"
 
-    #key generators for each cache tier — each one normalizes the input before hashing
+    #key generators for each cache tier, each one normalizes the input before hashing
     def intent_key(self, question: str) -> str:
         return self._key("intent", question.strip().lower())
 
@@ -70,7 +70,7 @@ class QueryCacheService:
         with self._lock:
             self._stats[tier][field] += 1
 
-    #generic get — tries redis first, then falls back to the in-memory store
+    #generic get, tries redis first then falls back to the in-memory store
     def _get(self, tier: str, key: str) -> str | None:
         if self._redis_client is not None:
             try:
@@ -81,7 +81,7 @@ class QueryCacheService:
             except Exception as exc:
                 logger.warning("Redis get failed for tier=%s key=%s: %s", tier, key, exc)
 
-        #redis missed or failed — check local memory store
+        #redis missed or failed, check the local memory store next
         with self._lock:
             current = self._memory_store.get(key)
             if current is None:
@@ -89,14 +89,14 @@ class QueryCacheService:
                 return None
             expires_at, value = current
             if expires_at < time.time():
-                #entry has expired — delete it and treat as a miss
+                #entry has expired, delete it and treat as a miss
                 del self._memory_store[key]
                 self._record(tier, "misses")
                 return None
         self._record(tier, "hits")
         return value
 
-    #generic set — writes to redis if available, otherwise writes to in-memory store
+    #generic set, writes to redis if available, otherwise writes to the in-memory store
     def _set(self, tier: str, key: str, value: str, ttl_seconds: int) -> None:
         self._record(tier, "sets")
         if self._redis_client is not None:
@@ -106,11 +106,11 @@ class QueryCacheService:
             except Exception as exc:
                 logger.warning("Redis set failed for tier=%s key=%s: %s", tier, key, exc)
 
-        #redis unavailable — store in memory with an expiry timestamp
+        #redis unavailable, store in memory with an expiry timestamp instead
         with self._lock:
             self._memory_store[key] = (time.time() + ttl_seconds, value)
 
-    #public get/set methods for each cache tier — these are what the rest of the app calls
+    #public get/set methods for each cache tier, these are what the rest of the app calls
     def get_intent(self, question: str) -> str | None:
         return self._get("intent", self.intent_key(question))
 
@@ -214,24 +214,20 @@ class QueryCacheService:
         """Clear all caches (Redis + in-memory) and reset stats."""
         cleared: list[str] = []
 
-        # Clear Redis
+        #upstash redis doesnt support flushdb or keys/scan through this client, so theres
+        #nothing real to do here yet, just recording that we tried
         if self._redis_client is not None:
             try:
-                # Upstash Redis doesn't support FLUSHDB via the python client
-                # So we delete by pattern for each namespace
                 for prefix in ("intent", "rag_answer", "sql_gen", "sql_result:v2", "embedding"):
-                    # Note: upstash-redis doesn't support KEYS/SCAN well
-                    # We just track that we attempted it
                     pass
                 cleared.append("redis")
             except Exception:
                 logger.exception("Redis clear failed")
 
-        # Clear in-memory store
+        #the in-memory store we can actually clear properly
         with self._lock:
             count = len(self._memory_store)
             self._memory_store.clear()
-            # Reset stats
             for tier in self._TIERS:
                 self._stats[tier] = defaultdict(int)
             cleared.append(f"memory ({count} entries)")

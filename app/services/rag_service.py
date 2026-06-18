@@ -17,12 +17,14 @@ from app.services.vector_store import search, hybrid_search, sparse_search
 from app.services.query_cache_service import query_cache
 
 
+#small helper so we dont have to null check flags everywhere, just returns the default if missing
 def _flag(flags: dict | None, key: str, default):
     if not isinstance(flags, dict):
         return default
     return flags.get(key, default)
 
 
+#picks which search fn to use based on the search_mode flag and runs it
 def _retrieve(question: str, flags: dict | None = None) -> list[RetrievedChunk]:
     top_k = int(_flag(flags, "top_k", 5))
     mode = _flag(flags, "search_mode", "dense")
@@ -37,14 +39,15 @@ def _retrieve(question: str, flags: dict | None = None) -> list[RetrievedChunk]:
         return search(query_embedding, top_k=top_k)
 
 
+#wraps the chunks with the spotlight warning, calls the llm, then parses its json reply
 def _generate(question: str, chunks: list[RetrievedChunk]) -> ChatResponse:
     spotlighted = build_spotlighted_context(chunks)
     system = build_system_prompt()
     user_message = f"{spotlighted}\n\nQuestion: {question}"
     raw = generate(system, user_message)["text"]
 
-    #the system prompt asks the llm for a json object — parse it (retrying on bad json)
-    #instead of of dumping the raw json/markdown straight into the answer field
+    #the system prompt asks the llm for a json object, so we parse it here instead of
+    #just dumping the raw json/markdown straight into the answer field. retries on bad json
     def _retry_llm(retry_prompt: str, _error: str) -> str:
         return generate(system, retry_prompt)["text"]
 
@@ -61,6 +64,7 @@ def _generate(question: str, chunks: list[RetrievedChunk]) -> ChatResponse:
     )
 
 
+#these flags get baked into the cache key, so different settings dont share the same cached answer
 def _cache_context(flags: dict | None) -> dict:
     return {
         "search_mode": _flag(flags, "search_mode", "dense"),
@@ -68,6 +72,7 @@ def _cache_context(flags: dict | None) -> dict:
     }
 
 
+#main entry point: checks cache first, otherwise retrieves chunks and generates an answer
 def run_rag(question: str, flags: dict | None = None) -> ChatResponse:
     cache_ctx = _cache_context(flags)
     cached = query_cache.get_rag_answer(question, cache_ctx)
@@ -90,8 +95,8 @@ def run_rag(question: str, flags: dict | None = None) -> ChatResponse:
     return response
 
 
-#same as run_rag but bypasses the cache entirely and also returns the retrieved chunks —
-#used by the eval harness, which needs fresh (uncached) runs plus the raw contexts for ragas scoring
+#same as run_rag but skips the cache entirely and also returns the retrieved chunks.
+#the eval harness uses this since it needs fresh, uncached runs plus the raw contexts for ragas
 def run_rag_with_trace_no_cache(
     question: str, flags: dict | None = None
 ) -> tuple[ChatResponse, list[RetrievedChunk]]:

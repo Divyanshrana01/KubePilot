@@ -6,20 +6,23 @@ from app.config import settings
 from app.models import ChatResponse
 
 
+#openai sometimes wraps json answers in ```json fences even when not asked to, strip those off
 def _strip_markdown_fences(text: str) -> str:
     text = text.strip()
     if text.startswith("```"):
         lines = text.splitlines()
-        # Remove first line (```json or ```)
+        # remove the opening ``` or ```json line
         if lines[0].startswith("```"):
             lines = lines[1:]
-        # Remove last line if it's ```
+        # remove the closing ``` line if its there
         if lines and lines[-1].strip() == "```":
             lines = lines[:-1]
         text = "\n".join(lines).strip()
     return text
 
 
+#parses the llm's raw text as our chat response schema, and if it doesnt parse or doesnt
+#match the schema, sends it back to the llm with the error so it can try fixing its own output
 def validate_with_retry(raw_str: str, llm_fn, max_retries: int | None = None) -> ChatResponse:
     if max_retries is None:
         max_retries = settings.max_validation_retries

@@ -12,7 +12,7 @@ from app.services.rag_service import run_rag_with_trace_no_cache
 class SkippedIntent(Exception):
     pass
 
-#base class for all invokers — defines the interface the eval harness uses
+#base class for all invokers, defines the interface the eval harness uses
 class Invoker(ABC):
 
     @abstractmethod
@@ -23,7 +23,7 @@ class Invoker(ABC):
 
 
 #this invoker calls our actual RAG service directly (no http round trip).
-#it only supports rag and web_fallback intents — sql and hybrid are not wired up yet.
+#it only supports rag and web_fallback intents, sql and hybrid arent wired up yet.
 class ServiceInvoker(Invoker):
     SUPPORTED_INTENTS = {"rag", "web_fallback"}
 

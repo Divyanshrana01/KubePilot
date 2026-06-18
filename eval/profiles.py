@@ -4,7 +4,7 @@ from __future__ import annotations
 #we pass these into the RAG pipeline to test how each feature improves results.
 #the eval harness picks a profile by name from the command line (e.g. --profile hybrid+rerank).
 PROFILES: dict[str, dict] = {
-    #naive: plain dense search, no extra features — the baseline to beat
+    #naive: plain dense search, no extra features, this is the baseline to beat
     "naive":{
         "search_mode": "dense",
         "enable_hyde": False,
@@ -58,7 +58,7 @@ PROFILES: dict[str, dict] = {
         "enable_self_reflective": False,
         "top_k": 5,
     },
-    #all: every feature on at the same time — the maximum quality profile
+    #all: every feature on at the same time, the maximum quality profile
     "all": {
         "search_mode": "hybrid",
         "enable_hyde": True,

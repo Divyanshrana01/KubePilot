@@ -17,11 +17,11 @@ class User(BaseModel):
     id: str
     is_admin: bool = False
 
-#hashes a plain text password using bcrypt with cost factor 12 — stores this in the db
+#hashes a plain text password using bcrypt with cost factor 12, stores this in the db
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
 
-#checks a plain text password against the stored bcrypt hash — returns True if they match
+#checks a plain text password against the stored bcrypt hash, returns True if they match
 def verify_password(plain_password: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain_password.encode("utf-8"), hashed.encode("utf-8"))
 
@@ -41,7 +41,7 @@ def create_access_token(username: str, expires_delta_seconds: int | None = None,
 
     return jwt.encode(payload, settings.jwt_secret_key, algorithm="HS256")
 
-#fastapi dependency — call this in any route that needs a logged-in user
+#fastapi dependency, call this in any route that needs a logged-in user
 #it decodes the jwt and returns a User object, or raises 401 if something is wrong
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
@@ -74,7 +74,7 @@ def get_current_user(
         ) from None
 
 
-#fastapi dependency — same as get_current_user but also checks the is_admin flag
+#fastapi dependency, same as get_current_user but also checks the is_admin flag
 #use this on admin-only routes so regular users get a 403
 def get_current_admin_user(user: User = Depends(get_current_user)) -> User:
     if not user.is_admin:

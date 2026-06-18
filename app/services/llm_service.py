@@ -25,7 +25,7 @@ def generate(system_prompt: str, user_message: str, model: str | None = None, te
 
     text = response.choices[0].message.content or ""
 
-    #pull out token counts from the response — useful for cost tracking
+    #pull out token counts from the response, useful for cost tracking
     usage = {
         "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
         "completion_tokens": response.usage.completion_tokens if response.usage else 0,

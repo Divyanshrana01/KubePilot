@@ -71,11 +71,11 @@ def main() -> None:
         try:
             resp, chunks = invoker.invoke(g.question, flags, g.intent)
         except SkippedIntent as e:
-            #intent not supported by this invoker — skip gracefully
+            #intent not supported by this invoker, skip it gracefully
             skipped.append({"id": g.id, "reason": str(e)})
             continue
         except Exception as e:
-            #unexpected error — skip and log it
+            #unexpected error, skip it and log the reason
             skipped.append({"id": g.id, "reason": f"error: {e}"})
             continue
 
@@ -112,7 +112,7 @@ def main() -> None:
             row["actual_sources"], row["golden_sources"]
         )
 
-    #build the output file path — default is eval/results/<timestamp>_<profile>.json
+    #build the output file path, defaults to eval/results/<timestamp>_<profile>.json
     timestamp = datetime.datetime.now(datetime.timezone.utc)
     out_path = (
         Path(args.output)

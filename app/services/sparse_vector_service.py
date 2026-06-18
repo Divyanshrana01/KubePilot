@@ -51,7 +51,7 @@ class SparseVectorIndex:
             results: list[RetrievedChunk] = []
             for idx in top_indices:
                 score = float(similarities[idx])
-                #skip chunks that have zero similarity — they share no keywords with the query
+                #skip chunks that have zero similarity, they share no keywords with the query
                 if score <= 0:
                     continue
                 doc = self.documents[idx]
@@ -78,7 +78,7 @@ def fuse_rrf(
     for result_list in result_lists:
         for rank, chunk in enumerate(result_list):
             key = chunk.text
-            #rrf formula: 1 / (k + rank + 1) — higher rank = higher score
+            #rrf formula: 1 / (k + rank + 1), higher rank means higher score
             scores[key] = scores.get(key, 0.0) + 1.0 / (rrf_k + rank + 1)
             if key not in meta:
                 meta[key] = {"text": chunk.text, "source": chunk.source}

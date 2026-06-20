@@ -77,6 +77,7 @@ class QueryRequest(BaseModel):
         description="User question",
     )
     top_k: int = Field(default=5, ge=1, le=50)
+    enable_hyde: bool = False
     search_mode: Literal["dense", "sparse", "hybrid"] = "dense"
     enable_rerank: bool | None = None
 

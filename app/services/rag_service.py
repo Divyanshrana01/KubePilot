@@ -17,9 +17,11 @@ from app.services.llm_service import generate
 from app.services.reranking import Reranker
 from app.services.vector_store import search, hybrid_search, sparse_search
 from app.services.query_cache_service import query_cache
+from app.services.hyde import HyDERetriever
 
 
 _reranker = Reranker()
+_hyde_retriever = HyDERetriever()
 
 
 #small helper so we dont have to null check flags everywhere, just returns the default if missing
@@ -36,6 +38,7 @@ def _retrieve(question: str, flags: dict | None = None) -> list[RetrievedChunk]:
     top_k = int(_flag(flags, "top_k", 5))
     mode = _flag(flags, "search_mode", "dense")
     use_rerank = bool(_flag(flags, "rerank", settings.reranking_enabled_by_default))
+    use_hyde = bool(_flag(flags, "hyde", settings.hyde_enabled_by_default))
     fetch_k = max(top_k, settings.reranker_initial_top_k) if use_rerank else top_k
 
     if mode == "sparse":
@@ -43,6 +46,10 @@ def _retrieve(question: str, flags: dict | None = None) -> list[RetrievedChunk]:
     elif mode == "hybrid":
         query_embedding = embed_texts([question])[0]
         candidates = hybrid_search(query_embedding, question, top_k=fetch_k)
+    elif use_hyde:
+        #hyde only makes sense for dense search since it works by generating extra
+        #texts to embed and search with, not by changing how sparse/hybrid scoring works
+        candidates = _hyde_retriever.retrieve(question, top_k=fetch_k)
     else:
         query_embedding = embed_texts([question])[0]
         candidates = search(query_embedding, top_k=fetch_k)
@@ -85,6 +92,7 @@ def _cache_context(flags: dict | None) -> dict:
         "top_k": int(_flag(flags, "top_k", 5)),
         "rerank": use_rerank,
         "rerank_backend": settings.reranker_backend if use_rerank else None,
+        "hyde": bool(_flag(flags, "hyde", settings.hyde_enabled_by_default)),
     }
 
 
@@ -99,10 +107,11 @@ def run_rag(question: str, flags: dict | None = None) -> ChatResponse:
         return resp
 
     logger.info(
-        "RAG query | mode={} top_k={} rerank={}",
-        _flag(flags, "search_mode", "dense"),
-        int(_flag(flags, "top_k", 5)),
+        "RAG query | mode={} top_k={} rerank={} hyde={}",
+        cache_ctx["search_mode"],
+        cache_ctx["top_k"],
         cache_ctx["rerank"],
+        cache_ctx["hyde"],
     )
 
     chunks = _retrieve(question, flags=flags)

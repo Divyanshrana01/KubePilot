@@ -7,12 +7,15 @@ from app.models import RetrievedChunk
 logger = logging.getLogger(__name__)
 
 
+#reorders chunks already pulled by the vector/sparse search using a smarter model
+#that actually reads (query, chunk) pairs together, instead of just comparing embeddings
 class Reranker:
     def __init__(self) -> None:
         self.backend = settings.reranker_backend
         self._local_model: object | None = None
         self._voyage_client: object | None = None
 
+    #loads the cross-encoder model once and reuses it, since loading is slow
     def _load_local_model(self) -> object:
         if self._local_model is None:
             from sentence_transformers import CrossEncoder
@@ -20,6 +23,7 @@ class Reranker:
             self._local_model = CrossEncoder(settings.reranker_model)
         return self._local_model
 
+    #loads the voyage api client once, fails fast if no api key is configured
     def _load_voyage_client(self) -> object:
         if self._voyage_client is None:
             import voyageai
@@ -29,7 +33,8 @@ class Reranker:
             self._voyage_client = voyageai.Client(api_key=settings.voyage_api_key)
         return self._voyage_client
 
-    
+    #main entry point: pick local or voyage backend, rerank, and if anything blows up
+    #just fall back to returning the chunks in their original order instead of erroring out
     def rerank(
         self,
         query: str,
@@ -38,7 +43,7 @@ class Reranker:
     ) -> list[RetrievedChunk]:
         if not chunks:
             return []
-        
+
         top_k = top_k or settings.reranker_initial_top_k
         top_k = min(top_k, len(chunks))
 
@@ -51,6 +56,8 @@ class Reranker:
             return chunks[:top_k]
 
 
+    #scores every (query, chunk) pair with the local cross-encoder model and
+    #sorts chunks by that new score, keeping only the top_k best
     def _rerank_local(
         self,
         query: str,
@@ -69,6 +76,9 @@ class Reranker:
         return scored[:top_k]
 
 
+    #same idea as _rerank_local but sends the work to voyage's hosted rerank api instead
+    #of running a model locally; voyage returns the original index of each result so we
+    #can map its scores back onto our RetrievedChunk objects
     def _rerank_voyage(
         self,
         query: str,

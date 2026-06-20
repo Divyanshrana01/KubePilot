@@ -62,7 +62,7 @@ def search(query_embedding: list[float], top_k: int = 5) -> list[RetrievedChunk]
     ]
 
 
-#pulls every chunk out of qdrant and builds a fresh tf-idf index over them for keyword search
+#pulls every chunk out of qdrant and builds a fresh bm25 index over them for keyword search
 #this is rebuilt on every call, fine for our doc count but wouldnt scale to a huge corpus
 def _build_sparse_index():
     from app.services.sparse_vector_service import SparseVectorIndex
@@ -86,7 +86,7 @@ def _build_sparse_index():
     return sparse_index
 
 def sparse_search(query_text: str, top_k: int = 5) -> list[RetrievedChunk]:
-    """Pure sparse search using TF-IDF (no dense embeddings, no fusion)."""
+    """Pure sparse search using BM25 (no dense embeddings, no fusion)."""
     sparse_index = _build_sparse_index()
     return sparse_index.search(query_text, top_k=top_k)
 

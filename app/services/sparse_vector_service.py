@@ -1,57 +1,56 @@
+import re
 import threading
 
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+from rank_bm25 import BM25Okapi
 
 from app.models import RetrievedChunk
 
-#this class builds a TF-IDF index over a set of documents so we can do keyword-based search.
-#TF-IDF gives higher scores to words that appear a lot in a chunk but rarely in other chunks.
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+def _tokenize(text: str) -> list[str]:
+    return _TOKEN_RE.findall(text.lower())
+
+
+#this class builds a BM25 index over a set of documents so we can do keyword-based search.
+#BM25 scores terms like TF-IDF but with saturation for repeated terms and
+#normalization for document length, which is why it's the standard for sparse retrieval.
 class SparseVectorIndex:
     def __init__(self) -> None:
-        #stop_words="english" removes common words like "the", "is", "and" that aren't useful
-        self.vectorizer = TfidfVectorizer(stop_words="english")
+        self.bm25: BM25Okapi | None = None
         self.documents: list[dict] = []
-        self.matrix = None
         self._lock = threading.RLock()
 
-    #this fn takes the list of documents and fits the tfidf vectorizer on all their texts.
-    #after this the matrix holds a sparse vector for every document ready to be searched.
+    #this fn takes the list of documents and builds a bm25 index over their tokenized texts.
     def fit(self, documents: list[dict]) -> None:
         with self._lock:
             self.documents = documents
             if not documents:
-                self.matrix = None
+                self.bm25 = None
                 return
 
-            texts = [doc.get("text", "") for doc in documents]
-            try:
-                self.matrix = self.vectorizer.fit_transform(texts)
-            except ValueError:
-                self.matrix = None
+            tokenized = [_tokenize(doc.get("text", "")) for doc in documents]
+            if not any(tokenized):
+                self.bm25 = None
                 return
 
-            #if no useful vocabulary was found (all stopwords etc), set matrix to None
-            if self.matrix.shape[1] == 0:
-                self.matrix = None
+            self.bm25 = BM25Okapi(tokenized)
 
-    #this fn takes a query string and returns the top-k most similar chunks using cosine similarity.
-    #it converts the query to a tfidf vector and compares it against all document vectors.
+    #this fn takes a query string and returns the top-k highest scoring chunks by bm25.
     def search(self, query: str, top_k: int = 20) -> list[RetrievedChunk]:
-        """Return top-k chunks by TF-IDF cosine similarity."""
+        """Return top-k chunks by BM25 score."""
         with self._lock:
-            if self.matrix is None or len(self.documents) == 0:
+            if self.bm25 is None or len(self.documents) == 0:
                 return []
 
-            query_vec = self.vectorizer.transform([query])
-            similarities = cosine_similarity(query_vec, self.matrix).flatten()
+            scores = self.bm25.get_scores(_tokenize(query))
             #sort descending and take the top_k indices
-            top_indices = similarities.argsort()[::-1][:top_k]
+            top_indices = scores.argsort()[::-1][:top_k]
 
             results: list[RetrievedChunk] = []
             for idx in top_indices:
-                score = float(similarities[idx])
-                #skip chunks that have zero similarity, they share no keywords with the query
+                score = float(scores[idx])
+                #skip chunks that have zero score, they share no keywords with the query
                 if score <= 0:
                     continue
                 doc = self.documents[idx]

@@ -8,13 +8,18 @@ from app.models import (
     RetrievedChunk,
     RetrievedChunkPreview,
 )
+from app.config import settings
 from app.security.output_validator import validate_with_retry
 from app.security.spotlighting import build_spotlighted_context
 from app.security.system_prompt import build_system_prompt
 from app.services.embedding_service import embed_texts
 from app.services.llm_service import generate
+from app.services.reranking import Reranker
 from app.services.vector_store import search, hybrid_search, sparse_search
 from app.services.query_cache_service import query_cache
+
+
+_reranker = Reranker()
 
 
 #small helper so we dont have to null check flags everywhere, just returns the default if missing
@@ -24,19 +29,27 @@ def _flag(flags: dict | None, key: str, default):
     return flags.get(key, default)
 
 
-#picks which search fn to use based on the search_mode flag and runs it
+#picks which search fn to use based on the search_mode flag and runs it.
+#if reranking is on, we overfetch a larger candidate pool first since the reranker
+#needs more options than top_k to actually improve on the initial ranking.
 def _retrieve(question: str, flags: dict | None = None) -> list[RetrievedChunk]:
     top_k = int(_flag(flags, "top_k", 5))
     mode = _flag(flags, "search_mode", "dense")
+    use_rerank = bool(_flag(flags, "rerank", settings.reranking_enabled_by_default))
+    fetch_k = max(top_k, settings.reranker_initial_top_k) if use_rerank else top_k
 
     if mode == "sparse":
-        return sparse_search(question, top_k=top_k)
+        candidates = sparse_search(question, top_k=fetch_k)
     elif mode == "hybrid":
         query_embedding = embed_texts([question])[0]
-        return hybrid_search(query_embedding, question, top_k=top_k)
+        candidates = hybrid_search(query_embedding, question, top_k=fetch_k)
     else:
         query_embedding = embed_texts([question])[0]
-        return search(query_embedding, top_k=top_k)
+        candidates = search(query_embedding, top_k=fetch_k)
+
+    if use_rerank:
+        return _reranker.rerank(question, candidates, top_k=top_k)
+    return candidates
 
 
 #wraps the chunks with the spotlight warning, calls the llm, then parses its json reply
@@ -66,9 +79,12 @@ def _generate(question: str, chunks: list[RetrievedChunk]) -> ChatResponse:
 
 #these flags get baked into the cache key, so different settings dont share the same cached answer
 def _cache_context(flags: dict | None) -> dict:
+    use_rerank = bool(_flag(flags, "rerank", settings.reranking_enabled_by_default))
     return {
         "search_mode": _flag(flags, "search_mode", "dense"),
         "top_k": int(_flag(flags, "top_k", 5)),
+        "rerank": use_rerank,
+        "rerank_backend": settings.reranker_backend if use_rerank else None,
     }
 
 
@@ -83,9 +99,10 @@ def run_rag(question: str, flags: dict | None = None) -> ChatResponse:
         return resp
 
     logger.info(
-        "RAG query | mode={} top_k={}",
+        "RAG query | mode={} top_k={} rerank={}",
         _flag(flags, "search_mode", "dense"),
         int(_flag(flags, "top_k", 5)),
+        cache_ctx["rerank"],
     )
 
     chunks = _retrieve(question, flags=flags)

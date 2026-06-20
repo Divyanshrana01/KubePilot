@@ -1,5 +1,4 @@
-from app.config import settings
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
 from app.middleware.auth import User, get_current_user
 from app.models import ChatResponse, QueryRequest
@@ -14,4 +13,7 @@ async def query(
     body: QueryRequest,
     user: User = Depends(get_current_user),
 ) -> ChatResponse:
-    return run_rag(body.question, flags={"top_k": body.top_k, "search_mode": body.search_mode})
+    flags = {"top_k": body.top_k, "search_mode": body.search_mode}
+    if body.enable_rerank is not None:
+        flags["rerank"] = body.enable_rerank
+    return run_rag(body.question, flags=flags)

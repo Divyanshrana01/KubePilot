@@ -78,6 +78,7 @@ class QueryRequest(BaseModel):
     )
     top_k: int = Field(default=5, ge=1, le=50)
     search_mode: Literal["dense", "sparse", "hybrid"] = "dense"
+    enable_rerank: bool | None = None
 
     #same injection check as ChatRequest but for the question field
     @field_validator("question")

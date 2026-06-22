@@ -12,8 +12,7 @@ wheels/
 .env
 
 
-
-README_PROJECT_DESCRIPTION.md
+seed/docs/noisy_data/
 
 # Eval results (generated output)
 eval/results/

@@ -1,3 +1,5 @@
+# Pydantic models
+
 import re
 from typing import Literal
 from pydantic import BaseModel, Field, field_validator
@@ -80,6 +82,7 @@ class QueryRequest(BaseModel):
     enable_hyde: bool = False
     search_mode: Literal["dense", "sparse", "hybrid"] = "dense"
     enable_rerank: bool | None = None
+    enable_crag: bool = True
 
     #same injection check as ChatRequest but for the question field
     @field_validator("question")
@@ -110,3 +113,14 @@ class RetrievedChunk(BaseModel):
     text: str
     source: str
     score: float = 0.0
+    
+    
+    
+#the grader's verdict on how relevant a retrieved chunk is, used by the CRAG flow
+class CRAGEvaluation(BaseModel):
+    relevance_score: float = 0.0
+    relevance_lable: str = ""
+    confidence: float = 0.0
+    reasoning: str = ""
+    
+    

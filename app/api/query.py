@@ -13,7 +13,7 @@ async def query(
     body: QueryRequest,
     user: User = Depends(get_current_user),
 ) -> ChatResponse:
-    flags = {"top_k": body.top_k, "search_mode": body.search_mode, "hyde": body.enable_hyde}
+    flags = {"top_k": body.top_k, "search_mode": body.search_mode, "hyde": body.enable_hyde, "enable_crag":body.enable_crag}
     if body.enable_rerank is not None:
         flags["rerank"] = body.enable_rerank
     return run_rag(body.question, flags=flags)

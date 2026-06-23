@@ -4,6 +4,7 @@ from loguru import logger
 
 from app.models import (
     ChatResponse,
+    CRAGEvaluation,
     ResponseMetadata,
     RetrievedChunk,
     RetrievedChunkPreview,
@@ -18,7 +19,7 @@ from app.services.reranking import Reranker
 from app.services.vector_store import search, hybrid_search, sparse_search
 from app.services.query_cache_service import query_cache
 from app.services.hyde import HyDERetriever
-
+from app.services.crag import crag_pipeline
 
 _reranker = Reranker()
 _hyde_retriever = HyDERetriever()
@@ -60,7 +61,12 @@ def _retrieve(question: str, flags: dict | None = None) -> list[RetrievedChunk]:
 
 
 #wraps the chunks with the spotlight warning, calls the llm, then parses its json reply
-def _generate(question: str, chunks: list[RetrievedChunk]) -> ChatResponse:
+def _generate(
+    question: str,
+    chunks: list[RetrievedChunk],
+    crag_evaluation: CRAGEvaluation | None = None,
+    crag_triggered: bool = False,
+) -> ChatResponse:
     spotlighted = build_spotlighted_context(chunks)
     system = build_system_prompt()
     user_message = f"{spotlighted}\n\nQuestion: {question}"
@@ -80,7 +86,12 @@ def _generate(question: str, chunks: list[RetrievedChunk]) -> ChatResponse:
         answer=parsed.answer,
         sources=list({c.source for c in chunks}),
         confidence=parsed.confidence,
-        metadata=ResponseMetadata(route="rag", retrieved_chunks=chunk_previews),
+        metadata=ResponseMetadata(
+            route="rag",
+            retrieved_chunks=chunk_previews,
+            crag_triggered=crag_triggered,
+            crag_relevance_score=crag_evaluation.relevance_score if crag_evaluation else None,
+        ),
     )
 
 
@@ -93,7 +104,16 @@ def _cache_context(flags: dict | None) -> dict:
         "rerank": use_rerank,
         "rerank_backend": settings.reranker_backend if use_rerank else None,
         "hyde": bool(_flag(flags, "hyde", settings.hyde_enabled_by_default)),
+        "crag": bool(_flag(flags, "enable_crag", settings.crag_enabled_by_default)),
     }
+
+
+#grades the retrieved chunks and swaps in web search results if theyre not relevant enough
+def _apply_crag(
+    question: str, chunks: list[RetrievedChunk], flags: dict | None
+) -> tuple[list[RetrievedChunk], CRAGEvaluation, bool]:
+    enable_crag = bool(_flag(flags, "enable_crag", settings.crag_enabled_by_default))
+    return crag_pipeline(question, chunks, enable_crag=enable_crag)
 
 
 #main entry point: checks cache first, otherwise retrieves chunks and generates an answer
@@ -107,15 +127,23 @@ def run_rag(question: str, flags: dict | None = None) -> ChatResponse:
         return resp
 
     logger.info(
-        "RAG query | mode={} top_k={} rerank={} hyde={}",
+        "RAG query | mode={} top_k={} rerank={} hyde={} crag={}",
         cache_ctx["search_mode"],
         cache_ctx["top_k"],
         cache_ctx["rerank"],
         cache_ctx["hyde"],
+        cache_ctx["crag"],
     )
 
     chunks = _retrieve(question, flags=flags)
-    response = _generate(question, chunks)
+    chunks, evaluation, triggered = _apply_crag(question, chunks, flags)
+    if triggered:
+        logger.info(
+            "CRAG fell back to web search | relevance={} label={}",
+            evaluation.relevance_score,
+            evaluation.relevance_label,
+        )
+    response = _generate(question, chunks, crag_evaluation=evaluation, crag_triggered=triggered)
 
     query_cache.set_rag_answer(question, response.model_dump(), cache_ctx)
     return response
@@ -127,5 +155,6 @@ def run_rag_with_trace_no_cache(
     question: str, flags: dict | None = None
 ) -> tuple[ChatResponse, list[RetrievedChunk]]:
     chunks = _retrieve(question, flags=flags)
-    response = _generate(question, chunks)
+    chunks, evaluation, triggered = _apply_crag(question, chunks, flags)
+    response = _generate(question, chunks, crag_evaluation=evaluation, crag_triggered=triggered)
     return response, chunks

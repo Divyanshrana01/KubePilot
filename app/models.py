@@ -50,6 +50,8 @@ class ResponseMetadata(BaseModel):
     route: str = "rag"
     retrieved_chunks: list[RetrievedChunkPreview] = Field(default_factory=list)
     cache_hit: bool = False
+    crag_triggered: bool = False
+    crag_relevance_score: float | None = None
 
 
 #when the system wants to run SQL, it stores it here until the user approves it
@@ -119,7 +121,7 @@ class RetrievedChunk(BaseModel):
 #the grader's verdict on how relevant a retrieved chunk is, used by the CRAG flow
 class CRAGEvaluation(BaseModel):
     relevance_score: float = 0.0
-    relevance_lable: str = ""
+    relevance_label: str = ""
     confidence: float = 0.0
     reasoning: str = ""
     

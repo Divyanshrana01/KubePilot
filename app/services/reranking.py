@@ -1,10 +1,32 @@
 import logging
+import threading
+import time
 from typing import cast
 
 from app.config import settings
 from app.models import RetrievedChunk
 
 logger = logging.getLogger(__name__)
+
+
+#blocks just long enough between calls to stay under voyage's free-tier rpm cap,
+#shared across Reranker instances since the rpm limit is per api key, not per object
+class _RateLimiter:
+    def __init__(self, calls_per_minute: int) -> None:
+        self._min_interval = 60.0 / calls_per_minute
+        self._lock = threading.Lock()
+        self._last_call = 0.0
+
+    def wait(self) -> None:
+        with self._lock:
+            now = time.monotonic()
+            elapsed = now - self._last_call
+            if elapsed < self._min_interval:
+                time.sleep(self._min_interval - elapsed)
+            self._last_call = time.monotonic()
+
+
+_voyage_rate_limiter = _RateLimiter(settings.voyage_rerank_rpm)
 
 
 #reorders chunks already pulled by the vector/sparse search using a smarter model
@@ -87,6 +109,7 @@ class Reranker:
     ) -> list[RetrievedChunk]:
         client = self._load_voyage_client()
         documents = [chunk.text for chunk in chunks]
+        _voyage_rate_limiter.wait()
         result = client.rerank(
             query=query,
             documents=documents,

@@ -72,6 +72,9 @@ class settings(BaseSettings):
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     voyage_api_key: str = ""
     voyage_model: str = "rerank-2.5"
+    #free voyage accounts (no payment method on file) are capped at 3 requests/min,
+    #so we throttle to just under that instead of burning retries on 429s
+    voyage_rerank_rpm: int = 3
     reranker_initial_top_k: int = 20
     reranking_enabled_by_default: bool = True
 

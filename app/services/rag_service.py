@@ -20,6 +20,8 @@ from app.services.vector_store import search, hybrid_search, sparse_search
 from app.services.query_cache_service import query_cache
 from app.services.hyde import HyDERetriever
 from app.services.crag import crag_pipeline
+from app.services.self_reflective import reflect_on_answer, should_regenerate
+
 
 _reranker = Reranker()
 _hyde_retriever = HyDERetriever()
@@ -66,18 +68,43 @@ def _generate(
     chunks: list[RetrievedChunk],
     crag_evaluation: CRAGEvaluation | None = None,
     crag_triggered: bool = False,
+    flags: dict | None = None,
 ) -> ChatResponse:
+    enable_self_reflective = bool(_flag(flags, "enable_self_reflective", False))
+
     spotlighted = build_spotlighted_context(chunks)
     system = build_system_prompt()
-    user_message = f"{spotlighted}\n\nQuestion: {question}"
-    raw = generate(system, user_message)["text"]
 
     #the system prompt asks the llm for a json object, so we parse it here instead of
     #just dumping the raw json/markdown straight into the answer field. retries on bad json
     def _retry_llm(retry_prompt: str, _error: str) -> str:
         return generate(system, retry_prompt)["text"]
 
-    parsed = validate_with_retry(raw, _retry_llm)
+    def _ask(q: str):
+        raw = generate(system, f"{spotlighted}\n\nQuestion: {q}")["text"]
+        return validate_with_retry(raw, _retry_llm)
+
+    working_q = question
+    parsed = _ask(working_q)
+
+    # Self-RAG: reflect on the answer; refine the question and retry if weak.
+    iterations = 0
+    last_score: float | None = None
+    final_refined: str | None = None
+    if enable_self_reflective:
+        while True:
+            reflection = reflect_on_answer(
+                question=working_q,
+                answer=parsed.answer,
+                context=spotlighted,
+            )
+            last_score = float(reflection.reflection_score)
+            if not should_regenerate(reflection, iterations):
+                break
+            final_refined = reflection.refined_question or working_q
+            working_q = final_refined
+            parsed = _ask(working_q)
+            iterations += 1
 
     chunk_previews = [
         RetrievedChunkPreview(text=c.text, source=c.source, score=c.score) for c in chunks
@@ -91,8 +118,12 @@ def _generate(
             retrieved_chunks=chunk_previews,
             crag_triggered=crag_triggered,
             crag_relevance_score=crag_evaluation.relevance_score if crag_evaluation else None,
+            reflection_iterations=iterations,
+            reflection_score=last_score,
+            refined_question=final_refined,
         ),
     )
+
 
 
 #these flags get baked into the cache key, so different settings dont share the same cached answer
@@ -143,7 +174,9 @@ def run_rag(question: str, flags: dict | None = None) -> ChatResponse:
             evaluation.relevance_score,
             evaluation.relevance_label,
         )
-    response = _generate(question, chunks, crag_evaluation=evaluation, crag_triggered=triggered)
+    response = _generate(
+        question, chunks, crag_evaluation=evaluation, crag_triggered=triggered, flags=flags
+    )
 
     query_cache.set_rag_answer(question, response.model_dump(), cache_ctx)
     return response
@@ -156,5 +189,7 @@ def run_rag_with_trace_no_cache(
 ) -> tuple[ChatResponse, list[RetrievedChunk]]:
     chunks = _retrieve(question, flags=flags)
     chunks, evaluation, triggered = _apply_crag(question, chunks, flags)
-    response = _generate(question, chunks, crag_evaluation=evaluation, crag_triggered=triggered)
+    response = _generate(
+        question, chunks, crag_evaluation=evaluation, crag_triggered=triggered, flags=flags
+    )
     return response, chunks

@@ -52,6 +52,9 @@ class ResponseMetadata(BaseModel):
     cache_hit: bool = False
     crag_triggered: bool = False
     crag_relevance_score: float | None = None
+    reflection_iterations: int = 0  #how many regenerate-and-reflect loops actually ran
+    reflection_score: float | None = None
+    refined_question: str | None = None  #the reformulated question, if reflection rewrote it
 
 
 #when the system wants to run SQL, it stores it here until the user approves it
@@ -85,6 +88,7 @@ class QueryRequest(BaseModel):
     search_mode: Literal["dense", "sparse", "hybrid"] = "dense"
     enable_rerank: bool | None = None
     enable_crag: bool = True
+    enable_self_reflective: bool = False  #opt-in: adds reflect-and-retry loop, costs extra LLM calls
 
     #same injection check as ChatRequest but for the question field
     @field_validator("question")
@@ -125,4 +129,11 @@ class CRAGEvaluation(BaseModel):
     confidence: float = 0.0
     reasoning: str = ""
     
-    
+
+class ReflectionResult(BaseModel):
+    """Self-RAG reflection on a generated answer (checks if the answer is good enough or needs redoing)."""
+
+    reflection_score: float = 0.0
+    needs_regeneration: bool = False
+    refined_question: str = ""
+    reasoning: str = ""

@@ -56,6 +56,44 @@ SRE / User (HTTPS + JWT Bearer)
 
 ---
 
+## Workflow
+
+What actually runs today, end to end, per `app/api/query.py` → `app/services/rag_service.py`:
+
+```mermaid
+flowchart TD
+    A[User Query] --> B{Cache hit?}
+    B -- yes --> Z[Return cached ChatResponse]
+    B -- no --> C[Retrieve]
+    C --> C1[dense / sparse / hybrid / HyDE search]
+    C1 --> C2{rerank enabled?}
+    C2 -- yes --> C3[Cross-encoder rerank]
+    C2 -- no --> D
+    C3 --> D[CRAG: grade chunk relevance]
+    D --> E{relevance < threshold?}
+    E -- yes --> F[Web search fallback - Tavily]
+    E -- no --> G[Keep retrieved chunks]
+    F --> H[Generate]
+    G --> H[Generate]
+    H --> H1[Spotlight context + system prompt]
+    H1 --> H2[LLM call -> parse + validate JSON answer]
+    H2 --> I{Self-RAG enabled?}
+    I -- no --> M[Answer]
+    I -- yes --> J[Reflect on answer quality]
+    J --> K{score low and retries left?}
+    K -- yes --> L[Refine question, re-ask]
+    L --> H2
+    K -- no --> M[Answer]
+    M --> N[Cache response]
+    N --> Z2[Return ChatResponse]
+```
+
+CRAG and Self-RAG are both feature-flagged per request (`enable_crag`, `enable_self_reflective` on `QueryRequest`) and were measured independently in the [evaluation results](eval/RESULTS.md).
+
+> Note: the intent router / Text2SQL split shown in the Architecture diagram above is the target design from `notebooks/text2sql.ipynb`; the live FastAPI service currently only serves the RAG path.
+
+---
+
 ## Tech Stack
 
 | Layer | Technology |
@@ -183,10 +221,22 @@ RAGAS metrics tracked per phase against 50 golden K8s incident Q&A pairs:
 Run evals:
 
 ```bash
-python eval/ragas_eval.py --phase all
+python eval/run_ragas.py --profile all
 ```
 
 Baseline scores are measured first, then delta tracked for each technique added. No metric is invented.
+
+### Results
+
+Measured on the 31-question golden K8s incident set, service mode, RAGAS judge:
+
+| Phase | Faithfulness | Context Precision | Context Recall | Answer Relevancy |
+|---|---|---|---|---|
+| Naive (dense-only) | 0.775 | 0.370 | 0.473 | 0.701 |
+| + Hybrid search + rerank | 0.802 | 0.371 | 0.470 | 0.702 |
+| + HyDE + CRAG + Self-RAG | **0.867** | **0.465** | **0.492** | **0.766** |
+
+Full breakdown, caveats, and the targeted CRAG-fallback eval: [eval/RESULTS.md](eval/RESULTS.md).
 
 ---
 

@@ -136,6 +136,7 @@ def _cache_context(flags: dict | None) -> dict:
         "rerank_backend": settings.reranker_backend if use_rerank else None,
         "hyde": bool(_flag(flags, "hyde", settings.hyde_enabled_by_default)),
         "crag": bool(_flag(flags, "enable_crag", settings.crag_enabled_by_default)),
+        "self_reflective": bool(_flag(flags, "enable_self_reflective", False)),
     }
 
 

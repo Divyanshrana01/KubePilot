@@ -124,8 +124,6 @@ def _generate(
         ),
     )
 
-
-
 #these flags get baked into the cache key, so different settings dont share the same cached answer
 def _cache_context(flags: dict | None) -> dict:
     use_rerank = bool(_flag(flags, "rerank", settings.reranking_enabled_by_default))
@@ -148,7 +146,9 @@ def _apply_crag(
     return crag_pipeline(question, chunks, enable_crag=enable_crag)
 
 
-#main entry point: checks cache first, otherwise retrieves chunks and generates an answer
+#main entry point: checks cache first, otherwise retrieves chunks and generates an answer.
+#plain rag only - sql/hybrid intents are routed and answered by the langgraph workflow in
+#app/core/graph.py instead, since that's where sql execution is gated behind human approval
 def run_rag(question: str, flags: dict | None = None) -> ChatResponse:
     cache_ctx = _cache_context(flags)
     cached = query_cache.get_rag_answer(question, cache_ctx)

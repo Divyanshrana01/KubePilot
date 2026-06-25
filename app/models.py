@@ -64,6 +64,13 @@ class PendingSQLBlock(BaseModel):
     explanation: str = ""
 
 
+#body for the /query/approve endpoint, used to resume a graph run that's paused on
+#a pending sql block. query_id is the thread_id handed back in that PendingSQLBlock
+class SQLApprovalRequest(BaseModel):
+    query_id: str
+    approved: bool
+
+
 #this is what the API sends back to the user after processing their question
 class ChatResponse(BaseModel):
     answer: str = Field(..., min_length=0)
@@ -73,7 +80,6 @@ class ChatResponse(BaseModel):
     cache_hit: bool = False
     cost_saved: str = "$0.00"
     metadata: ResponseMetadata = Field(default_factory=ResponseMetadata)
-
 
 #this is the request body for the /query endpoint (direct RAG query with flags)
 class QueryRequest(BaseModel):

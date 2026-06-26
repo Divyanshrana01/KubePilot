@@ -86,6 +86,9 @@ services:
       - ./app:/app/app
       - ./scripts:/app/scripts
       - ./seed:/app/seed
+      # persist the HuggingFace model cache so the llm-guard scanner models survive a
+      # container recreate, instead of re-downloading ~2GB on every `compose up`
+      - hf_cache:/root/.cache/huggingface
     command: ["python", "scripts/serve.py"]
     depends_on:
       postgres:
@@ -97,3 +100,4 @@ services:
 volumes:
   postgres_data:
   qdrant_data:
+  hf_cache:

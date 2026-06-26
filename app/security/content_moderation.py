@@ -38,22 +38,23 @@ def _get_pii_scanners() -> list[Any]:
     if _pii_scanners is not None:
         return _pii_scanners
     from llm_guard.output_scanners import Sensitive
-    _pii_scanners = [Sensitive(redact=True, threshold=settings.output_toxicity_threshold)]
+    _pii_scanners = [Sensitive()]
     return _pii_scanners
 
 
-#same lazy-build pattern as above but for toxicity + banned topics
+#same lazy-build pattern as above but for output toxicity.
+#NOTE: BanTopics is intentionally NOT used on the output path. its zero-shot classifier
+#flags everyday k8s/SRE vocabulary (e.g. "OOM killer terminated the container", "force
+#delete", "evict the node") as violence/illegal, which would 500 legitimate answers.
+#toxicity (abusive language) is a better-calibrated signal for output. the input guard
+#still runs BanTopics, where it gates user questions rather than our own generated text.
 def _get_moderation_scanners() -> list[Any]:
     global _moderation_scanners
     if _moderation_scanners is not None:
         return _moderation_scanners
-    from llm_guard.output_scanners import Toxicity, BanTopics
+    from llm_guard.output_scanners import Toxicity
     _moderation_scanners = [
         Toxicity(threshold=settings.output_toxicity_threshold),
-        BanTopics(
-            topics=["violence", "self-harm", "illegal activities"],
-            threshold=0.9,
-        ),
     ]
     return _moderation_scanners
 
@@ -62,7 +63,7 @@ def redact_pii(text: str) -> str:
     if _SCAN_OUTPUT is not None:
         try:
             scanners = _get_pii_scanners()
-            sanitized, _, _ = _SCAN_OUTPUT(scanners, "", text)
+            sanitized, _ = _SCAN_OUTPUT(scanners, "", text)
             return str(sanitized)
         except Exception:
             logger.exception("llm-guard PII redaction failed; using regex fallback")
@@ -79,7 +80,7 @@ def moderate_output(text: str) -> tuple[bool, str | None]:
     if _SCAN_OUTPUT is not None:
         try:
             scanners = _get_moderation_scanners()
-            _, is_valid, _ = _SCAN_OUTPUT(scanners, "", text)
+            _, is_valid = _SCAN_OUTPUT(scanners, "", text)
             failed = [name for name, valid in is_valid.items() if not valid]
             if failed:
                 checks = ", ".join(failed)

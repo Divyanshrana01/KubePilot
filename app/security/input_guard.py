@@ -53,12 +53,12 @@ def scan_input(text: str) -> dict[str, Any]:
 
     try:
         scanners = _get_scanners()
-        sanitized, is_valid, scores = _SCAN_PROMPT(scanners, text)
+        sanitized, is_valid = _SCAN_PROMPT(scanners, text)
         failed = [name for name, valid in is_valid.items() if not valid]
         return {
             "is_safe": len(failed) == 0,
             "failed_checks": failed,
-            "scores": dict(scores),
+            "scores": {},
             "sanitized": str(sanitized),
         }
     except Exception:

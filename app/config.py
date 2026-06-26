@@ -97,6 +97,10 @@ class settings(BaseSettings):
     log_json: bool = False
     log_level:str = "INFO"
 
+    #cors: which browser origins (the react dev server / deployed frontend) may call the api.
+    #set CORS_ALLOW_ORIGINS in .env as a comma-separated list or json array for other envs.
+    cors_allow_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+
 
 #create the single shared settings object that all other files import
 settings = settings()

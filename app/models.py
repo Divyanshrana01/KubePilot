@@ -4,39 +4,33 @@ import re
 from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
-#this is what the user sends in when they want to chat with the AI.
-#the validator below blocks empty messages and common prompt injection attacks.
-class ChatRequest(BaseModel):
-    message: str = Field(
-        ...,
-        min_length=1,
-        max_length=2000,
-        description="User message to the AI assistant",
-    )
-    @field_validator("message")
-    @classmethod
-    def validate_message_content(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("Message cannot be empty or whitespace only")
+#these regex patterns catch common tricks people use to hijack the AI. this is a cheap
+#first-pass filter at the schema layer; the heavier llm-guard pipeline in app/security
+#does the real injection/moderation scanning once the request reaches the route.
+_INJECTION_PATTERNS = [
+    r"(?i)(ignore\s+previous|ignore\s+above|forget\s+your\s+instructions)",
+    r"(?i)(system\s*prompt|reveal\s+your\s+instructions|show\s+your\s+prompt)",
+    r"(?i)(you\s+are\s+now|new\s+instructions|override\s+previous)",
+    r"(?i)(<\s*script|javascript:|on\w+\s*=)",
+]
 
-        #these regex patterns catch common tricks people use to hijack the AI
-        injection_patterns = [
-            r"(?i)(ignore\s+previous|ignore\s+above|forget\s+your\s+instructions)",
-            r"(?i)(system\s*prompt|reveal\s+your\s+instructions|show\s+your\s+prompt)",
-            r"(?i)(you\s+are\s+now|new\s+instructions|override\s+previous)",
-            r"(?i)(<\s*script|javascript:|on\w+\s*=)",
-        ]
 
-        for pattern in injection_patterns:
-            if re.search(pattern, v):
-                raise ValueError("Message contains potentially malicious content")
+#shared validator for any free-text field a user sends in: strips it, rejects empty or
+#symbol-only input, and blocks the obvious prompt-injection patterns above.
+def reject_unsafe_text(v: str) -> str:
+    v = v.strip()
+    if not v:
+        raise ValueError("Text cannot be empty or whitespace only")
 
-        #reject messages that are only symbols/punctuation with no real words
-        if re.match(r"^[\W_]+$", v):
-            raise ValueError("Message must contain actual text content")
+    for pattern in _INJECTION_PATTERNS:
+        if re.search(pattern, v):
+            raise ValueError("Text contains potentially malicious content")
 
-        return v
+    #reject input that is only symbols/punctuation with no real words
+    if re.match(r"^[\W_]+$", v):
+        raise ValueError("Text must contain actual content")
+
+    return v
 
 
 #a small preview of a retrieved chunk, used inside the response metadata
@@ -96,28 +90,11 @@ class QueryRequest(BaseModel):
     enable_crag: bool = True
     enable_self_reflective: bool = False  #opt-in: adds reflect-and-retry loop, costs extra LLM calls
 
-    #same injection check as ChatRequest but for the question field
+    #reuse the shared free-text validator (strip, reject empty/symbol-only, block injections)
     @field_validator("question")
     @classmethod
     def validate_question_content(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("Question cannot be empty or whitespace only")
-
-        injection_patterns = [
-            r"(?i)(ignore\s+previous|ignore\s+above|forget\s+your\s+instructions)",
-            r"(?i)(system\s*prompt|reveal\s+your\s+instructions|show\s+your\s+prompt)",
-            r"(?i)(you\s+are\s+now|new\s+instructions|override\s+previous)",
-            r"(?i)(<\s*script|javascript:|on\w+\s*=)",
-        ]
-        for pattern in injection_patterns:
-            if re.search(pattern, v):
-                raise ValueError("Question contains potentially malicious content")
-
-        if re.match(r"^[\W_]+$", v):
-            raise ValueError("Question must contain actual text content")
-
-        return v
+        return reject_unsafe_text(v)
 
 
 #a single chunk of text that was pulled from the vector store

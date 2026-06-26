@@ -127,8 +127,9 @@ async def query(
 
 
 #called after the ui shows the user a pending_sql block and they approve/reject it.
-#resumes the graph run that's paused at request_sql_approval in app/core/graph.py
-@router.post("/query/approve", response_model=ChatResponse)
+#resumes the graph run that's paused at request_sql_approval in app/core/graph.py.
+#path must stay /query/sql/execute - the streamlit ui posts there (scripts/streamlit_app.py)
+@router.post("/query/sql/execute", response_model=ChatResponse)
 async def approve_query(
     body: SQLApprovalRequest,
     user: User = Depends(get_current_user),

@@ -52,6 +52,10 @@ class GraphState(TypedDict):
     sources: list[str]
     confidence: float | None
     chunk_previews: list[dict]
+    # generate_answer writes both of these; they MUST be declared here or LangGraph drops
+    # them from the merged state and the API sees cache_hit=False with empty metadata.
+    cache_hit: bool
+    metadata: dict
 
     # --- Telemetry: cache hits and cost savings surfaced for observability ---
     cache_hits: dict[str, bool]

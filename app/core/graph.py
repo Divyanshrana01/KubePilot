@@ -151,6 +151,8 @@ def generate_answer(state: GraphState) -> dict:
 
     if intent == "sql":
         rows = state.get("sql_rows", [])
+        # surface the SQL that was generated/run so the UI can show it in a disclosure
+        sql_meta = {"route": "sql", "executed_sql": state.get("generated_sql", "")}
         # execute_sql sets final_answer only when the query failed or was rejected —
         # surface that message directly rather than running it through the LLM.
         preset = state.get("final_answer")
@@ -159,7 +161,7 @@ def generate_answer(state: GraphState) -> dict:
                 "final_answer": preset,
                 "sources": ["database query"],
                 "confidence": 0.9,
-                "metadata": {"route": "sql"},
+                "metadata": sql_meta,
             }
         # Otherwise turn the result rows (an empty set included) into a natural-language
         # answer instead of dumping raw JSON at the user.
@@ -167,7 +169,7 @@ def generate_answer(state: GraphState) -> dict:
             "final_answer": _synthesize_sql_answer(state["question"], rows),
             "sources": ["database query"],
             "confidence": 0.9,
-            "metadata": {"route": "sql"},
+            "metadata": sql_meta,
         }
 
     if intent == "hybrid":

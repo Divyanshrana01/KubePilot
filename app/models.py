@@ -49,6 +49,7 @@ class ResponseMetadata(BaseModel):
     reflection_iterations: int = 0  #how many regenerate-and-reflect loops actually ran
     reflection_score: float | None = None
     refined_question: str | None = None  #the reformulated question, if reflection rewrote it
+    executed_sql: str | None = None  #the SQL generated/run on the sql route, surfaced to the UI
 
 
 #when the system wants to run SQL, it stores it here until the user approves it

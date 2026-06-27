@@ -28,6 +28,7 @@ export interface ResponseMetadata {
   reflection_iterations: number;
   reflection_score: number | null;
   refined_question: string | null;
+  executed_sql: string | null;
 }
 
 export interface PendingSQLBlock {

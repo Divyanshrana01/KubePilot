@@ -37,6 +37,16 @@ class Reranker:
         self._local_model: object | None = None
         self._voyage_client: object | None = None
 
+    #preload the local cross-encoder at startup so the first reranked query doesn't eat the
+    #model-load cost (~1-3s) inline. no-op for the voyage backend, which loads no local model.
+    def warm(self) -> None:
+        if self.backend == "voyage":
+            return
+        try:
+            self._load_local_model()
+        except Exception:
+            logger.exception("reranker warmup failed; first reranked query will pay the load cost")
+
     #loads the cross-encoder model once and reuses it, since loading is slow
     def _load_local_model(self) -> object:
         if self._local_model is None:

@@ -4,8 +4,10 @@ from app.config import settings
 from app.services.query_cache_service import query_cache
 
 
-#shared openai client used for all embedding calls
-openai_client = OpenAI(api_key=settings.openai_api_key)
+#shared openai client used for all embedding calls.
+#bounded timeout/retries so a stalled embedding call fails fast instead of hanging the
+#whole request behind the SDK's 600s default.
+openai_client = OpenAI(api_key=settings.openai_api_key, timeout=30.0, max_retries=2)
 
 #this fn takes a list of text strings and returns a list of embeddings (float vectors).
 #it checks the cache first for each text, only calls openai for the ones that aren't cached yet.

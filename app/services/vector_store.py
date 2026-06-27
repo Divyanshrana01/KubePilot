@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import uuid
 
 from qdrant_client import QdrantClient
@@ -62,8 +63,9 @@ def search(query_embedding: list[float], top_k: int = 5) -> list[RetrievedChunk]
     ]
 
 
-#pulls every chunk out of qdrant and builds a fresh bm25 index over them for keyword search
-#this is rebuilt on every call, fine for our doc count but wouldnt scale to a huge corpus
+#pulls every chunk out of qdrant and builds a bm25 index over them for keyword search.
+#this scrolls the whole collection (~10k docs) and tokenizes all of it, so it's expensive
+#(~several seconds) - which is why the result is cached below instead of rebuilt per query.
 def _build_sparse_index():
     from app.services.sparse_vector_service import SparseVectorIndex
     client = get_client()
@@ -85,10 +87,35 @@ def _build_sparse_index():
     sparse_index.fit(documents)
     return sparse_index
 
+
+#the bm25 index is built from a corpus that only changes at ingest time, so building it on
+#every sparse/hybrid query (scroll 10k docs + tokenize) was pure wasted latency. cache it
+#and reuse across requests; call invalidate_sparse_index() after seeding new documents.
+_sparse_index = None
+_sparse_index_lock = threading.Lock()
+
+
+def get_sparse_index(force_rebuild: bool = False):
+    """Return the cached BM25 index, building it once on first use (thread-safe)."""
+    global _sparse_index
+    if _sparse_index is not None and not force_rebuild:
+        return _sparse_index
+    with _sparse_index_lock:
+        if _sparse_index is None or force_rebuild:
+            _sparse_index = _build_sparse_index()
+    return _sparse_index
+
+
+def invalidate_sparse_index() -> None:
+    """Drop the cached BM25 index so the next search rebuilds it (call after re-seeding)."""
+    global _sparse_index
+    with _sparse_index_lock:
+        _sparse_index = None
+
+
 def sparse_search(query_text: str, top_k: int = 5) -> list[RetrievedChunk]:
     """Pure sparse search using BM25 (no dense embeddings, no fusion)."""
-    sparse_index = _build_sparse_index()
-    return sparse_index.search(query_text, top_k=top_k)
+    return get_sparse_index().search(query_text, top_k=top_k)
 
 
 #runs both dense and sparse search then merges the two ranked lists into one with rrf
@@ -102,7 +129,6 @@ def hybrid_search(
 
     from app.services.sparse_vector_service import fuse_rrf
     dense_results = search(query_embedding, top_k=sparse_top_k)
-    sparse_index = _build_sparse_index()
-    sparse_results = sparse_index.search(query_text, top_k=sparse_top_k)
+    sparse_results = get_sparse_index().search(query_text, top_k=sparse_top_k)
     fused = fuse_rrf([dense_results, sparse_results], rrf_k=rrf_k)
     return fused[:top_k]

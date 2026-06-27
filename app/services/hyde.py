@@ -3,6 +3,7 @@
 # The idea is that a plausible answer is closer in meaning to real documents than a short question.
 
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 from app.config import settings
 from app.models import RetrievedChunk
@@ -32,21 +33,25 @@ class HyDERetriever:
         if not question or not question.strip():
             return []
 
-        hypotheses: list[str] = []
-        for _ in range(self.num_hypotheses):
+        # The N hypotheses are independent, so generate them concurrently instead of in a
+        # serial loop — this turns HyDE's cost from N sequential LLM round-trips into ~1.
+        # They also use the cheaper/faster grader model: a hypothesis only needs to be a
+        # plausible search probe, not a polished answer, so the flagship model is wasted here.
+        def _one_hypothesis(_: int) -> str:
             try:
                 response = generate(
                     system_prompt=_HYDE_SYSTEM_PROMPT,
                     user_message=question,
-                    model=settings.llm_model_answer,
+                    model=settings.llm_model_grader,
                     temperature=0.7,
                 )
-                hypothesis = response.get("text", "").strip()
-                if hypothesis:
-                    hypotheses.append(hypothesis)
+                return response.get("text", "").strip()
             except Exception:
                 # If generating a hypothesis fails, just skip it and keep going.
-                continue
+                return ""
+
+        with ThreadPoolExecutor(max_workers=self.num_hypotheses) as pool:
+            hypotheses = [h for h in pool.map(_one_hypothesis, range(self.num_hypotheses)) if h]
 
         # Always include the raw question itself as one of the search texts,
         # in case the hypotheses turn out to be off-base.

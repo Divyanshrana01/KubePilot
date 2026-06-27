@@ -10,6 +10,8 @@ wheels/
 .venv
 
 .env
+.env.*
+!.env.example
 
 
 seed/docs/noisy_data/

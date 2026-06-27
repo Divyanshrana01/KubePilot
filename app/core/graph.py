@@ -125,26 +125,49 @@ def execute_sql(state: GraphState) -> dict:
 
 
 
+def _synthesize_sql_answer(question: str, rows: list) -> str:
+    """Turn raw SQL result rows into a natural-language answer via the LLM.
+
+    Without this the user just sees a JSON dump of the rows. We hand the model the
+    original question plus the result rows and ask it to phrase a direct answer,
+    grounded only on those rows (so it can't invent numbers that aren't there).
+    """
+    results_json = _safe_json_dumps(rows, indent=2)
+    system = (
+        "You are a Kubernetes IT-Operations / SRE assistant. You are given a user's question "
+        "and the rows returned by a SQL query that was run to answer it. Write a concise, "
+        "direct, natural-language answer to the question based ONLY on these rows. State the "
+        "key figure(s) plainly in a full sentence. If the rows are empty, say no matching "
+        "records were found. Do not invent data that isn't in the rows. Cite the source as "
+        "[database query]."
+    )
+    user_msg = f"Question: {question}\n\nSQL result rows (JSON):\n{results_json}"
+    return generate(system, user_msg)["text"]
+
+
 def generate_answer(state: GraphState) -> dict:
     """Produce the final answer, branching by intent: SQL results, hybrid synthesis, or plain RAG."""
     intent = state.get("intent", "rag")
 
     if intent == "sql":
         rows = state.get("sql_rows", [])
-        if not rows:
-            # Empty rows can mean "query ran but found nothing" or "execution
-            # failed" (execute_sql sets final_answer with the error in that
-            # case) — fall back to a generic message only if neither set one.
+        # execute_sql sets final_answer only when the query failed or was rejected —
+        # surface that message directly rather than running it through the LLM.
+        preset = state.get("final_answer")
+        if preset:
             return {
-                "final_answer": state.get("final_answer", "No results."),
+                "final_answer": preset,
                 "sources": ["database query"],
                 "confidence": 0.9,
+                "metadata": {"route": "sql"},
             }
-        answer = f"Query results:\n```\n{_safe_json_dumps(rows, indent=2)}\n```"
+        # Otherwise turn the result rows (an empty set included) into a natural-language
+        # answer instead of dumping raw JSON at the user.
         return {
-            "final_answer": answer,
+            "final_answer": _synthesize_sql_answer(state["question"], rows),
             "sources": ["database query"],
             "confidence": 0.9,
+            "metadata": {"route": "sql"},
         }
 
     if intent == "hybrid":

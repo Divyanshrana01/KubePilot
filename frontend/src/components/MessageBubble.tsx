@@ -1,5 +1,7 @@
+import { useState } from "react";
 import Markdown from "react-markdown";
-import { Database, Lightbulb, RefreshCw, Zap } from "lucide-react";
+import { ChevronDown, Database, ExternalLink, FileText, Lightbulb, RefreshCw, Zap } from "lucide-react";
+import type { ChatResponse } from "@/api/types";
 import type { ChatMessage, QueryFlags } from "@/chat/types";
 import { applySuggestions, suggestImprovements, type Suggestion } from "@/chat/suggestions";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +18,14 @@ interface MessageBubbleProps {
   onApproveSql: (queryId: string, approved: boolean) => Promise<void>;
   onRetry: (question: string, newFlags: QueryFlags) => void;
 }
+
+// Human-readable labels for the pipeline stages streamed over SSE.
+const STAGE_LABELS: Record<string, string> = {
+  routing: "Routing your question…",
+  retrieving: "Retrieving documents…",
+  grading: "Grading relevance (CRAG)…",
+  generating: "Generating answer…",
+};
 
 // Shown under a weak answer: lists pipeline options that might help and offers a
 // one-click re-run with them switched on.
@@ -49,6 +59,96 @@ function SuggestionBar({
   );
 }
 
+// Collapsible disclosure that reveals the SQL that was generated/run to answer the question.
+function SqlDisclosure({ sql }: { sql: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-xl border border-border bg-card">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+        aria-expanded={open}
+      >
+        <Database className="h-3.5 w-3.5" />
+        View SQL query
+        <ChevronDown className={cn("ml-auto h-4 w-4 transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <pre className="overflow-x-auto border-t border-border px-3 py-2 text-xs leading-relaxed">
+          <code>{sql}</code>
+        </pre>
+      )}
+    </div>
+  );
+}
+
+// A source string is rendered as a real link when it looks like a URL (e.g. web-search
+// fallback results), otherwise as plain text (local document / table names aren't links).
+function SourceLabel({ source }: { source: string }) {
+  const isUrl = /^https?:\/\//i.test(source);
+  if (isUrl) {
+    return (
+      <a
+        href={source}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={source}
+        className="inline-flex min-w-0 items-center gap-1 truncate text-xs font-medium text-primary hover:underline"
+      >
+        <span className="truncate">{source}</span>
+        <ExternalLink className="h-3 w-3 shrink-0" />
+      </a>
+    );
+  }
+  return (
+    <span className="truncate text-xs font-medium" title={source}>
+      {source}
+    </span>
+  );
+}
+
+// Collapsible "N sources" disclosure: lists the retrieved chunks (source + relevance score
+// + snippet) so the user can actually see and open what the answer was grounded on.
+function SourcesDisclosure({ response }: { response: ChatResponse }) {
+  const [open, setOpen] = useState(false);
+  const chunks = response.metadata.retrieved_chunks;
+  const count = response.sources.length;
+  return (
+    <div className="rounded-xl border border-border bg-card">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <FileText className="h-3.5 w-3.5" />
+        {count} source{count === 1 ? "" : "s"}
+        <ChevronDown className={cn("ml-auto h-4 w-4 transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <div className="space-y-2 border-t border-border px-3 py-2">
+          {chunks.length > 0
+            ? chunks.map((c, i) => (
+                <div key={i} className="rounded-md bg-muted/40 p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <SourceLabel source={c.source || "unknown"} />
+                    <Badge variant="outline">{c.score.toFixed(3)}</Badge>
+                  </div>
+                  <p className="mt-1 line-clamp-3 text-xs text-muted-foreground">{c.text}</p>
+                </div>
+              ))
+            : response.sources.map((s, i) => (
+                <div key={i} className="flex">
+                  <SourceLabel source={s} />
+                </div>
+              ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function MessageBubble({
   message,
   isActive,
@@ -67,14 +167,23 @@ export function MessageBubble({
     );
   }
 
-  const { response, error } = message;
+  const { response, error, stage, streamedText } = message;
 
-  // In flight
+  // In flight: show the current pipeline stage, then stream the answer text as tokens arrive.
   if (!response && !error) {
     return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Spinner />
-        Working through the pipeline…
+      <div className="max-w-[85%] rounded-2xl rounded-bl-sm border border-border bg-card px-4 py-3 text-sm">
+        {streamedText ? (
+          <div className="prose-chat">
+            <Markdown>{streamedText}</Markdown>
+            <span className="ml-0.5 inline-block h-3 w-1.5 animate-pulse rounded-sm bg-primary align-middle" />
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Spinner />
+            {STAGE_LABELS[stage ?? "routing"] ?? "Working…"}
+          </div>
+        )}
       </div>
     );
   }
@@ -132,11 +241,14 @@ export function MessageBubble({
               cache hit
             </Badge>
           )}
-          {response.sources.length > 0 && (
-            <Badge variant="outline">{response.sources.length} sources</Badge>
-          )}
         </div>
       </button>
+      {response.metadata.route !== "sql" && response.sources.length > 0 && (
+        <SourcesDisclosure response={response} />
+      )}
+      {response.metadata.route === "sql" && response.metadata.executed_sql && (
+        <SqlDisclosure sql={response.metadata.executed_sql} />
+      )}
       {suggestions.length > 0 && (
         <SuggestionBar
           suggestions={suggestions}

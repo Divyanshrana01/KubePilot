@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { Boxes, LogOut } from "lucide-react";
-import { api, ApiError } from "@/api/client";
+import { api, ApiError, queryStream } from "@/api/client";
 import { useAuth } from "@/auth/AuthContext";
 import {
   DEFAULT_FLAGS,
@@ -32,6 +32,17 @@ export function Chat() {
     );
   }, []);
 
+  // Append a streamed token to an assistant message's running text.
+  const appendToken = useCallback((id: string, text: string) => {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === id && m.role === "assistant"
+          ? { ...m, streamedText: (m.streamedText ?? "") + text }
+          : m,
+      ),
+    );
+  }, []);
+
   const handleAuthError = useCallback(
     (err: unknown): string => {
       if (err instanceof ApiError) {
@@ -58,21 +69,33 @@ export function Chat() {
         question,
         flags: flagsToUse,
         response: null,
+        stage: "routing",
+        streamedText: "",
       };
       setMessages((prev) => [...prev, userMsg, assistantMsg]);
       setBusy(true);
 
       try {
-        const response = await api.query({ question, ...flagsToUse });
-        patchMessage(assistantId, { response });
-        if (!response.pending_sql) setActiveId(assistantId);
+        await queryStream(
+          { question, ...flagsToUse },
+          {
+            onStage: (stage) => patchMessage(assistantId, { stage }),
+            onToken: (text) => appendToken(assistantId, text),
+            onDone: (response) => {
+              patchMessage(assistantId, { response, stage: null });
+              if (!response.pending_sql) setActiveId(assistantId);
+            },
+            onError: (err) =>
+              patchMessage(assistantId, { error: handleAuthError(err), stage: null }),
+          },
+        );
       } catch (err) {
-        patchMessage(assistantId, { error: handleAuthError(err) });
+        patchMessage(assistantId, { error: handleAuthError(err), stage: null });
       } finally {
         setBusy(false);
       }
     },
-    [busy, patchMessage, handleAuthError],
+    [busy, patchMessage, appendToken, handleAuthError],
   );
 
   const send = useCallback(() => {

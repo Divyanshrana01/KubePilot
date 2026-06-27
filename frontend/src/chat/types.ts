@@ -36,6 +36,9 @@ export interface AssistantMessage {
   // null while the request is in flight; populated once the backend responds.
   response: ChatResponse | null;
   error?: string;
+  // streaming UI state, populated as SSE events arrive (cleared once `response` is set):
+  stage?: string | null; // current pipeline stage label (routing/retrieving/grading/generating)
+  streamedText?: string; // answer text accumulated token-by-token during generation
 }
 
 export type ChatMessage = UserMessage | AssistantMessage;

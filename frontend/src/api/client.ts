@@ -88,3 +88,102 @@ export const api = {
     });
   },
 };
+
+// Callbacks the streaming query drives as Server-Sent Events arrive.
+export interface StreamHandlers {
+  onStage?: (stage: string) => void;
+  onToken?: (text: string) => void;
+  onDone?: (response: ChatResponse) => void;
+  onError?: (err: ApiError) => void;
+}
+
+// Map a `done` SSE event (ChatResponse fields at the top level) onto a full ChatResponse,
+// filling defaults for anything the streaming path doesn't send.
+function toChatResponse(ev: Record<string, unknown>): ChatResponse {
+  const meta = (ev.metadata ?? {}) as ChatResponse["metadata"];
+  return {
+    answer: (ev.answer as string) ?? "",
+    sources: (ev.sources as string[]) ?? [],
+    confidence: (ev.confidence as number) ?? 0,
+    pending_sql: (ev.pending_sql as ChatResponse["pending_sql"]) ?? null,
+    cache_hit: (ev.cache_hit as boolean) ?? false,
+    cost_saved: (ev.cost_saved as string) ?? "$0.00",
+    metadata: meta,
+  };
+}
+
+// POST /query/stream and dispatch each SSE frame to the handlers. EventSource can't do
+// POST + auth headers, so we read the response body stream and parse `data:` frames manually.
+export async function queryStream(
+  body: QueryRequest,
+  handlers: StreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  const headers = new Headers({ "Content-Type": "application/json" });
+  const token = getToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
+  const res = await fetch(`${API_PREFIX}/query/stream`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  if (!res.ok || !res.body) {
+    // Errors raised before streaming starts (400/401/429) come back as a normal JSON body.
+    let detail = res.statusText;
+    try {
+      const b = await res.json();
+      if (typeof b?.detail === "string") detail = b.detail;
+      else if (Array.isArray(b?.detail)) detail = b.detail[0]?.msg ?? detail;
+    } catch {
+      // keep statusText
+    }
+    handlers.onError?.(new ApiError(res.status, detail));
+    return;
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    // SSE frames are separated by a blank line; keep any trailing partial frame in the buffer.
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() ?? "";
+
+    for (const frame of frames) {
+      const dataLine = frame.split("\n").find((l) => l.startsWith("data:"));
+      if (!dataLine) continue;
+      const payload = dataLine.slice(5).trim();
+      if (!payload) continue;
+
+      let ev: Record<string, unknown>;
+      try {
+        ev = JSON.parse(payload);
+      } catch {
+        continue;
+      }
+
+      switch (ev.type) {
+        case "stage":
+          handlers.onStage?.(ev.stage as string);
+          break;
+        case "token":
+          handlers.onToken?.(ev.text as string);
+          break;
+        case "done":
+          handlers.onDone?.(toChatResponse(ev));
+          break;
+        case "error":
+          handlers.onError?.(new ApiError(500, (ev.detail as string) ?? "stream error"));
+          break;
+      }
+    }
+  }
+}

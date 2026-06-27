@@ -37,6 +37,17 @@ def build_system_prompt() -> str:
     return HARDENED_SYSTEM_PROMPT
 
 
+def build_chitchat_system_prompt() -> str:
+    """Prompt for greetings / small talk — answered directly, with no retrieval involved."""
+    return (
+        "You are KubePilot, a friendly Kubernetes IT-Operations / SRE assistant. The user is "
+        "greeting you or making small talk, not asking a technical question. Reply briefly and "
+        "warmly in one or two sentences. If they ask what you can do or who you are, say you "
+        "help SREs with Kubernetes incidents, pod failures, runbooks, and cluster/metrics "
+        "questions, and invite them to ask. Do not invent technical details or cite sources."
+    )
+
+
 def build_streaming_system_prompt() -> str:
     """Same hardened prompt, but asks for plain prose instead of a JSON object.
 

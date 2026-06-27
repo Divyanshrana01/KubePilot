@@ -15,7 +15,7 @@ from app.security.content_moderation import moderate_and_redact, redact_pii
 from app.security.input_guard import check_input_safe
 from app.security.input_restructuring import count_tokens, restructure_input
 from app.security.token_budget import check_budget, consume_budget
-from app.services.rag_service import run_rag_stream
+from app.services.rag_service import run_chitchat_stream, run_rag_stream
 from app.services.router_service import classify_intent
 
 router = APIRouter(tags=["query"])
@@ -169,6 +169,16 @@ def query_stream(
         try:
             yield _sse({"type": "stage", "stage": "routing"})
             intent = classify_intent(moderated_in)
+
+            #greetings / small talk: stream a direct reply, skip retrieval entirely
+            if intent == "chitchat":
+                for ev in run_chitchat_stream(moderated_in):
+                    if ev.get("type") == "done":
+                        _allowed, redacted, _ = moderate_and_redact(ev.get("answer", ""))
+                        ev = {**ev, "answer": redacted}
+                    yield _sse(ev)
+                consume_budget(user.id, estimated)
+                return
 
             if intent == "rag":
                 for ev in run_rag_stream(moderated_in, flags=flags):

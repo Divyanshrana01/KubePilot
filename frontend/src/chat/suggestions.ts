@@ -15,8 +15,9 @@ export interface Suggestion {
 const WEAK_CONFIDENCE = 0.6;
 
 export function isWeakResult(response: ChatResponse): boolean {
-  // SQL answers don't go through retrieval, so the retrieval toggles can't help them.
-  if (response.metadata.route === "sql") return false;
+  // SQL answers and chit-chat don't go through retrieval, so the retrieval toggles
+  // can't help them — never flag those as weak.
+  if (response.metadata.route === "sql" || response.metadata.route === "chitchat") return false;
   return response.confidence < WEAK_CONFIDENCE || response.sources.length === 0;
 }
 

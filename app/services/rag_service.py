@@ -14,7 +14,11 @@ from app.models import (
 from app.config import settings
 from app.security.output_validator import validate_with_retry
 from app.security.spotlighting import build_spotlighted_context
-from app.security.system_prompt import build_streaming_system_prompt, build_system_prompt
+from app.security.system_prompt import (
+    build_chitchat_system_prompt,
+    build_streaming_system_prompt,
+    build_system_prompt,
+)
 from app.services.embedding_service import embed_texts
 from app.services.llm_service import generate, generate_stream
 from app.services.reranking import Reranker
@@ -206,6 +210,27 @@ def run_rag(question: str, flags: dict | None = None) -> ChatResponse:
 #  {"type":"done", ...}          the final structured payload (answer/sources/confidence/meta)
 #self-reflection is intentionally skipped here: it reflects *after* generation and may
 #regenerate, which can't be expressed as a single forward token stream. it stays on /query.
+#stream a direct conversational reply for greetings / small talk: no retrieval, no CRAG,
+#no sources — so the UI shows a clean answer instead of a 0%-confidence "weak answer" nudge
+#with a misleading source count. metadata carries full defaults so the trace panel renders.
+def run_chitchat_stream(question: str):
+    yield {"type": "stage", "stage": "generating"}
+    parts: list[str] = []
+    for delta in generate_stream(build_chitchat_system_prompt(), question):
+        parts.append(delta)
+        yield {"type": "token", "text": delta}
+    answer = "".join(parts).strip()
+    yield {
+        "type": "done",
+        "answer": answer,
+        "sources": [],
+        "confidence": 1.0,
+        "cache_hit": False,
+        "pending_sql": None,
+        "metadata": ResponseMetadata(route="chitchat").model_dump(),
+    }
+
+
 def run_rag_stream(question: str, flags: dict | None = None):
     cache_ctx = _cache_context(flags)
     cached = query_cache.get_rag_answer(question, cache_ctx)

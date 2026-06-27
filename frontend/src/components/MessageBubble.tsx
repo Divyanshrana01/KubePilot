@@ -209,6 +209,18 @@ export function MessageBubble({
     );
   }
 
+  // Chit-chat / greetings: no retrieval happened, so render a plain reply with no
+  // confidence badge, source count, or "weak answer" nudge.
+  if (response.metadata.route === "chitchat") {
+    return (
+      <div className="max-w-[85%] rounded-2xl rounded-bl-sm border border-border bg-card px-4 py-3 text-sm">
+        <div className="prose-chat">
+          <Markdown>{response.answer || "_(empty answer)_"}</Markdown>
+        </div>
+      </div>
+    );
+  }
+
   const confidencePct = Math.round(response.confidence * 100);
   const suggestions = suggestImprovements(response, message.flags);
 

@@ -13,6 +13,7 @@ from langgraph.types import interrupt
 from app.config import settings
 from app.core.state import GraphState
 from app.security.spotlighting import build_spotlighted_context
+from app.security.system_prompt import build_chitchat_system_prompt
 from app.services.llm_service import generate
 from app.services.rag_service import run_rag
 from app.services.router_service import classify_intent
@@ -146,8 +147,18 @@ def _synthesize_sql_answer(question: str, rows: list) -> str:
 
 
 def generate_answer(state: GraphState) -> dict:
-    """Produce the final answer, branching by intent: SQL results, hybrid synthesis, or plain RAG."""
+    """Produce the final answer, branching by intent: chit-chat, SQL results, hybrid synthesis, or plain RAG."""
     intent = state.get("intent", "rag")
+
+    if intent == "chitchat":
+        # Greetings / small talk: reply directly, no retrieval, no sources.
+        reply = generate(build_chitchat_system_prompt(), state["question"])["text"]
+        return {
+            "final_answer": reply,
+            "sources": [],
+            "confidence": 1.0,
+            "metadata": {"route": "chitchat"},
+        }
 
     if intent == "sql":
         rows = state.get("sql_rows", [])
@@ -256,7 +267,12 @@ def build_graph():
     builder.add_conditional_edges(
         "route_intent",
         lambda s: s.get("intent", "rag"),
-        {"sql": "generate_sql_node", "rag": "generate_answer", "hybrid": "retrieve_rag"},
+        {
+            "sql": "generate_sql_node",
+            "rag": "generate_answer",
+            "hybrid": "retrieve_rag",
+            "chitchat": "generate_answer",
+        },
     )
     # hybrid path: retrieved docs feed into the same SQL generation/approval/execution
     # pipeline used by the sql path, so both branches converge here.

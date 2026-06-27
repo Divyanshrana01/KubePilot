@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from loguru import logger
 
 from app.models import (
@@ -12,9 +14,9 @@ from app.models import (
 from app.config import settings
 from app.security.output_validator import validate_with_retry
 from app.security.spotlighting import build_spotlighted_context
-from app.security.system_prompt import build_system_prompt
+from app.security.system_prompt import build_streaming_system_prompt, build_system_prompt
 from app.services.embedding_service import embed_texts
-from app.services.llm_service import generate
+from app.services.llm_service import generate, generate_stream
 from app.services.reranking import Reranker
 from app.services.vector_store import search, hybrid_search, sparse_search
 from app.services.query_cache_service import query_cache
@@ -167,8 +169,13 @@ def run_rag(question: str, flags: dict | None = None) -> ChatResponse:
         cache_ctx["crag"],
     )
 
+    #time each stage so it's clear from the logs where a slow query actually spends its time
+    #(retrieval+rerank vs CRAG grading vs answer generation), rather than guessing.
+    t0 = time.perf_counter()
     chunks = _retrieve(question, flags=flags)
+    t_retrieve = time.perf_counter()
     chunks, evaluation, triggered = _apply_crag(question, chunks, flags)
+    t_crag = time.perf_counter()
     if triggered:
         logger.info(
             "CRAG fell back to web search | relevance={} label={}",
@@ -178,9 +185,93 @@ def run_rag(question: str, flags: dict | None = None) -> ChatResponse:
     response = _generate(
         question, chunks, crag_evaluation=evaluation, crag_triggered=triggered, flags=flags
     )
+    t_generate = time.perf_counter()
+
+    logger.info(
+        "RAG timing (s) | retrieve={:.2f} crag={:.2f} generate={:.2f} total={:.2f}",
+        t_retrieve - t0,
+        t_crag - t_retrieve,
+        t_generate - t_crag,
+        t_generate - t0,
+    )
 
     query_cache.set_rag_answer(question, response.model_dump(), cache_ctx)
     return response
+
+
+#streaming version of run_rag for the SSE endpoint. instead of returning one ChatResponse,
+#it yields a sequence of event dicts the API serialises to the client:
+#  {"type":"stage","stage":...}  pipeline progress (retrieving / grading / generating)
+#  {"type":"token","text":...}   answer text deltas as the model produces them
+#  {"type":"done", ...}          the final structured payload (answer/sources/confidence/meta)
+#self-reflection is intentionally skipped here: it reflects *after* generation and may
+#regenerate, which can't be expressed as a single forward token stream. it stays on /query.
+def run_rag_stream(question: str, flags: dict | None = None):
+    cache_ctx = _cache_context(flags)
+    cached = query_cache.get_rag_answer(question, cache_ctx)
+    if cached is not None:
+        resp = ChatResponse(**cached)
+        resp.metadata.cache_hit = True
+        #emit the whole cached answer as a single token so it appears instantly in the UI
+        yield {"type": "token", "text": resp.answer}
+        yield {
+            "type": "done",
+            "answer": resp.answer,
+            "sources": resp.sources,
+            "confidence": resp.confidence,
+            "cache_hit": True,
+            "pending_sql": None,
+            "metadata": resp.metadata.model_dump(),
+        }
+        return
+
+    yield {"type": "stage", "stage": "retrieving"}
+    chunks = _retrieve(question, flags=flags)
+
+    enable_crag = bool(_flag(flags, "enable_crag", settings.crag_enabled_by_default))
+    evaluation: CRAGEvaluation | None = None
+    triggered = False
+    if enable_crag:
+        yield {"type": "stage", "stage": "grading"}
+        chunks, evaluation, triggered = _apply_crag(question, chunks, flags)
+
+    yield {"type": "stage", "stage": "generating"}
+    spotlighted = build_spotlighted_context(chunks)
+    system = build_streaming_system_prompt()
+
+    parts: list[str] = []
+    for delta in generate_stream(system, f"{spotlighted}\n\nQuestion: {question}"):
+        parts.append(delta)
+        yield {"type": "token", "text": delta}
+    answer = "".join(parts).strip()
+
+    sources = list({c.source for c in chunks})
+    #no LLM-reported confidence on the streaming path (we asked for prose, not JSON), so use
+    #the CRAG relevance score as the confidence signal when available, else a neutral default.
+    confidence = float(evaluation.relevance_score) if evaluation else 0.85
+    confidence = max(0.0, min(1.0, confidence))
+    metadata = ResponseMetadata(
+        route="rag",
+        retrieved_chunks=[
+            RetrievedChunkPreview(text=c.text, source=c.source, score=c.score) for c in chunks
+        ],
+        crag_triggered=triggered,
+        crag_relevance_score=evaluation.relevance_score if evaluation else None,
+    )
+    response = ChatResponse(
+        answer=answer, sources=sources, confidence=confidence, metadata=metadata
+    )
+    query_cache.set_rag_answer(question, response.model_dump(), cache_ctx)
+
+    yield {
+        "type": "done",
+        "answer": answer,
+        "sources": sources,
+        "confidence": confidence,
+        "cache_hit": False,
+        "pending_sql": None,
+        "metadata": metadata.model_dump(),
+    }
 
 
 #same as run_rag but skips the cache entirely and also returns the retrieved chunks.

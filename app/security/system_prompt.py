@@ -35,3 +35,19 @@ Return a JSON object with exactly these fields:
 def build_system_prompt() -> str:
     """Return the hardened system prompt for the Kubernetes IT-Operations domain."""
     return HARDENED_SYSTEM_PROMPT
+
+
+def build_streaming_system_prompt() -> str:
+    """Same hardened prompt, but asks for plain prose instead of a JSON object.
+
+    The non-streaming path parses a JSON {answer, sources, confidence} reply; when we stream
+    tokens straight to the UI we want clean prose, not JSON characters, so we keep every
+    security/behavioral rule but swap the RESPONSE FORMAT section.
+    """
+    base = HARDENED_SYSTEM_PROMPT.split("RESPONSE FORMAT:")[0].rstrip()
+    return (
+        base
+        + "\n\nRESPONSE FORMAT:\n"
+        + "Write a clear, direct prose answer (no JSON, no wrapping code fences). "
+        + "Cite sources inline using [source_name]."
+    )

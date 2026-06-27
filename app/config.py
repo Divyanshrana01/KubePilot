@@ -55,6 +55,12 @@ class settings(BaseSettings):
 
     #security thresholds, if a score is above these we reject the input/output
     prompt_injection_threshold: float = 0.75
+    #the bundled llm-guard PromptInjection model (JasperLS/gelectra-base-injection, pinned by
+    #the old llm-guard release) misclassifies benign instructional questions ("Explain how X
+    #works...") as injection and exposes no model/match_type knob to fix it, so it's off by
+    #default. Classic injection patterns are still caught by the regex in app/models.py and the
+    #hardened system prompt + spotlighting. Flip on (and upgrade llm-guard) for the ML layer.
+    prompt_injection_scan_enabled: bool = False
     toxicity_threshold: float = 0.75
     output_toxicity_threshold: float = 0.5
     max_validation_retries: int = 2
